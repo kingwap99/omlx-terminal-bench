@@ -1,0 +1,78 @@
+{
+  "dataset": "terminal-bench-2.0-subset18",
+  "host": "Apple M1 Max 128GB",
+  "date": "2026-11-07",
+  "models": {
+    "Qwen3.8-Flash-Next-oQ4e-mtp": {
+      "trials": 18,
+      "passed": 11,
+      "score_pct": 61.1,
+      "timeouts": 7,
+      "flagged": 0,
+      "median_agent_min": 11.3,
+      "median_tool_calls": 12.5,
+      "median_input_tokens": 260628,
+      "median_output_tokens": 10294,
+      "passed_tasks": [
+        "db-wal-recovery",
+        "fix-code-vulnerability",
+        "fix-git",
+        "git-leak-recovery",
+        "hf-model-inference",
+        "largest-eigenval",
+        "log-summary-date-ranges",
+        "nginx-request-logging",
+        "openssl-selfsigned-cert",
+        "prove-plus-comm",
+        "pytorch-model-cli"
+      ]
+    },
+    "Qwen3.8-Flash-Next-Uncensored-oQ5e-mtp": {
+      "trials": 18,
+      "passed": 12,
+      "score_pct": 66.7,
+      "timeouts": 7,
+      "flagged": 0,
+      "median_agent_min": 13.3,
+      "median_tool_calls": 13.5,
+      "median_input_tokens": 305154,
+      "median_output_tokens": 10340,
+      "passed_tasks": [
+        "db-wal-recovery",
+        "fix-code-vulnerability",
+        "fix-git",
+        "git-leak-recovery",
+        "hf-model-inference",
+        "log-summary-date-ranges",
+        "merge-diff-arc-agi-task",
+        "openssl-selfsigned-cert",
+        "polyglot-rust-c",
+        "prove-plus-comm",
+        "pytorch-model-cli",
+        "raman-fitting"
+      ]
+    },
+    "Swift1.5-Qwen3.8-Flash-Next-oQ5e-mtp": {
+      "trials": 18,
+      "passed": 9,
+      "score_pct": 50.0,
+      "timeouts": 8,
+      "flagged": 0,
+      "median_agent_min": 13.0,
+      "median_tool_calls": 13.0,
+      "median_input_tokens": 294698,
+      "median_output_tokens": 9208,
+      "passed_tasks": [
+        "db-wal-recovery",
+        "fix-code-vulnerability",
+        "fix-git",
+        "git-leak-recovery",
+        "log-summary-date-ranges",
+        "merge-diff-arc-agi-task",
+        "openssl-selfsigned-cert",
+        "prove-plus-comm",
+        "pytorch-model-cli"
+      ]
+    }
+  }
+}
