@@ -1,0 +1,14 @@
+{
+  "name": "omlx-bench-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Terminal-Bench runner for oMLX models with pause/resume, saved runs, machine specs, and comparison.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

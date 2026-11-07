@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>oMLX Terminal-Bench Runner</title>
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<header>
+  <div class="brand">
+    <h1>oMLX Terminal-Bench Runner</h1>
+    <span id="serverBadge" class="badge gray">connecting…</span>
+    <span id="machineBadge" class="badge gray">hardware: loading…</span>
+  </div>
+  <nav>
+    <button data-tab="launch" class="tab active">New run</button>
+    <button data-tab="runs" class="tab">Runs</button>
+    <button data-tab="compare" class="tab">Compare</button>
+    <button data-tab="settings" class="tab">Settings</button>
+  </nav>
+</header>
+<main>
+  <section id="tab-launch" class="panel">
+    <div class="grid2">
+      <div class="card">
+        <h2>1. Pick an oMLX model</h2>
+        <div id="modelList" class="model-list"><p class="muted">loading models…</p></div>
+        <div class="row">
+          <label><input type="checkbox" id="chkPreload" checked /> Preload model before starting</label>
+        </div>
+      </div>
+      <div class="card">
+        <h2>2. Pick a test set</h2>
+        <div class="row"><label>Dataset <select id="selDataset"></select></label></div>
+        <div class="row"><label>Include tasks (globs, blank = all)
+          <input id="txtInclude" placeholder="e.g. fix-*,git-*" />
+        </label></div>
+        <div class="row"><label>Exclude tasks (one glob per line)
+          <textarea id="txtExclude" rows="2"></textarea>
+        </label></div>
+        <p id="taskCount" class="muted"></p>
+        <div class="row">
+          <label>Tasks per batch <input id="numConcurrency" type="number" min="1" max="8" value="4" /></label>
+          <label>Batch cap (min) <input id="numTimeout" type="number" min="15" value="300" /></label>
+        </div>
+        <p class="muted">Batch size is also the pause granularity: the runner finishes the current batch, then pauses. You can resume later.</p>
+      </div>
+    </div>
+    <div class="card">
+      <h2>3. Start</h2>
+      <div class="row"><label>Name <input id="txtRunName" placeholder="auto-named if blank" /></label></div>
+      <button id="btnStart" class="primary big">Start run</button>
+      <span id="startMsg" class="muted"></span>
+    </div>
+  </section>
+
+  <section id="tab-runs" class="panel hidden">
+    <div class="card">
+      <h2>Runs</h2>
+      <div id="runsTable" class="table-wrap"><p class="muted">no runs yet</p></div>
+    </div>
+    <div id="runDetail"></div>
+  </section>
+
+  <section id="tab-compare" class="panel hidden">
+    <div class="card">
+      <h2>Compare runs</h2>
+      <div id="comparePicker" class="chips"></div>
+      <div class="row"><button id="btnCompare" class="primary">Build comparison</button></div>
+      <div id="compareTable" class="table-wrap"></div>
+      <h3 id="cmpDiffTitle" class="hidden">Per-task results (✅ pass / ❌ fail / ⏱ timeout)</h3>
+      <div id="compareDiff" class="table-wrap"></div>
+    </div>
+  </section>
+
+  <section id="tab-settings" class="panel hidden">
+    <div class="card">
+      <h2>oMLX connection</h2>
+      <div class="row"><label>Base URL <input id="cfgBaseUrl" /></label></div>
+      <div class="row"><label>API key (blank = unchanged) <input id="cfgApiKey" placeholder="unchanged" /></label></div>
+      <button id="btnSaveCfg" class="primary">Save</button>
+      <span id="cfgMsg" class="muted"></span>
+    </div>
+    <div class="card">
+      <h2>Harbor / runner</h2>
+      <div class="row">
+        <label>Agent version <input id="cfgAgentVersion" /></label>
+        <label>Default batch size <input id="cfgConcurrency" type="number" min="1" max="8" /></label>
+        <label>Batch cap (min) <input id="cfgRunTimeout" type="number" min="15" /></label>
+      </div>
+      <div class="row"><label><input id="cfgNotify" type="checkbox" /> Send a macOS notification on completion</label></div>
+      <button id="btnSaveHarbor" class="primary">Save runner settings</button>
+    </div>
+  </section>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

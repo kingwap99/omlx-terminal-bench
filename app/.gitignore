@@ -1,0 +1,6 @@
+node_modules/
+data/config.json
+data/runs/
+*.out
+*.err
+.DS_Store

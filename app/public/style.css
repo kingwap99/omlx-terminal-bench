@@ -1,0 +1,65 @@
+:root {
+  --bg: #0f1420;
+  --card: #171e2e;
+  --card2: #1d2639;
+  --text: #e8ecf4;
+  --muted: #8b96ab;
+  --accent: #4f8cff;
+  --good: #3ecf8e;
+  --bad: #ff6b6b;
+  --warn: #ffb454;
+  --line: #2a3550;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, "PingFang TC", "Noto Sans TC", sans-serif; background: var(--bg); color: var(--text); }
+header { padding: 14px 22px 0; border-bottom: 1px solid var(--line); background: var(--card); }
+.brand { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+h1 { font-size: 18px; margin: 0 8px 10px 0; }
+h2 { font-size: 15px; margin: 0 0 10px; color: var(--text); }
+h3 { font-size: 14px; margin: 18px 0 8px; }
+nav { display: flex; gap: 6px; margin-top: 6px; }
+nav button { background: none; border: none; color: var(--muted); padding: 10px 14px; cursor: pointer; font-size: 14px; border-bottom: 2px solid transparent; }
+nav button.active { color: var(--text); border-bottom-color: var(--accent); }
+main { padding: 18px 22px 60px; max-width: 1280px; margin: 0 auto; }
+.panel.hidden { display: none; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin: 14px 0; }
+.row { display: flex; gap: 14px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+label { color: var(--muted); font-size: 13px; display: inline-flex; align-items: center; gap: 8px; }
+input, select, textarea { background: var(--card2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; font-size: 13px; }
+textarea { width: 100%; resize: vertical; }
+input[type="number"] { width: 90px; }
+button.primary { background: var(--accent); color: #fff; border: none; border-radius: 7px; padding: 8px 16px; cursor: pointer; font-size: 14px; }
+button.primary:disabled { opacity: .5; cursor: not-allowed; }
+button.big { padding: 10px 26px; font-size: 15px; }
+button.small { background: var(--card2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
+button.danger { border-color: #6b3040; color: var(--bad); }
+.muted { color: var(--muted); font-size: 12.5px; }
+.badge { font-size: 11.5px; padding: 3px 9px; border-radius: 20px; background: var(--card2); border: 1px solid var(--line); }
+.badge.green { color: var(--good); border-color: #2c6650; }
+.badge.red { color: var(--bad); border-color: #6b3040; }
+.badge.yellow { color: var(--warn); border-color: #6b5630; }
+.badge.blue { color: var(--accent); border-color: #33517e; }
+.badge.gray { color: var(--muted); }
+.model-list { display: flex; flex-direction: column; gap: 6px; }
+.model-item { display: flex; align-items: center; gap: 10px; background: var(--card2); border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; cursor: pointer; }
+.model-item.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.model-item .grow { flex: 1; }
+.model-item .mid { font-size: 12px; color: var(--muted); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { border-bottom: 1px solid var(--line); padding: 7px 9px; text-align: left; vertical-align: top; }
+th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--card); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.table-wrap { overflow: auto; max-height: 420px; }
+progress { width: 100%; height: 10px; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.chip { background: var(--card2); border: 1px solid var(--line); color: var(--muted); padding: 6px 12px; border-radius: 18px; cursor: pointer; font-size: 13px; }
+.chip.on { color: var(--text); border-color: var(--accent); background: #20304d; }
+.log { background: #0b101b; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; white-space: pre-wrap; word-break: break-all; max-height: 260px; overflow: auto; color: #a8b3c7; }
+.kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px 18px; font-size: 12.5px; }
+.kv b { color: var(--muted); font-weight: 600; margin-right: 6px; }
+.pass { color: var(--good); }
+.fail { color: var(--bad); }
+.ok-flag { background: rgba(62, 207, 142, .1); }
+.bad-flag { background: rgba(255, 107, 107, .12); }

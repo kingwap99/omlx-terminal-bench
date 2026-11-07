@@ -1,0 +1,518 @@
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { spawn } from "node:child_process";
+import { RUNS_DIR } from "./config.js";
+import { listTasks, filterTasks, recordFromTrial, summarize } from "./tasks.js";
+import { machineSnapshot, preloadCheck } from "./omlx.js";
+
+const runtime = new Map(); // runId -> { child, pauseRequested, cancelRequested, batchDir }
+
+function runDir(id) {
+  return path.join(RUNS_DIR, id);
+}
+function metaPath(id) {
+  return path.join(runDir(id), "run.json");
+}
+function resultsPath(id) {
+  return path.join(runDir(id), "results.json");
+}
+
+function writeJson(p, obj) {
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  const tmp = p + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
+  fs.renameSync(tmp, p);
+}
+
+export function readRun(id) {
+  try {
+    return JSON.parse(fs.readFileSync(metaPath(id), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+export function readResults(id) {
+  try {
+    return JSON.parse(fs.readFileSync(resultsPath(id), "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+function saveRun(run, records) {
+  run.updatedAt = new Date().toISOString();
+  run.summary = summarize(records ?? readResults(run.id));
+  writeJson(metaPath(run.id), run);
+  if (records) writeJson(resultsPath(run.id), records);
+}
+
+export function listRuns() {
+  if (!fs.existsSync(RUNS_DIR)) return [];
+  const out = [];
+  for (const id of fs.readdirSync(RUNS_DIR).sort()) {
+    const run = readRun(id);
+    if (run) out.push(run);
+  }
+  return out.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+}
+
+function stampId() {
+  const d = new Date();
+  const p = (n, w = 2) => String(n).padStart(w, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+function tail(file, lines = 60) {
+  try {
+    const all = fs.readFileSync(file, "utf8").split("\n");
+    return all.slice(-lines).join("\n");
+  } catch {
+    return "";
+  }
+}
+
+function killTree(child, signal = "SIGTERM") {
+  if (!child || child.killed || child.exitCode !== null) return;
+  try {
+    process.kill(-child.pid, signal);
+  } catch {
+    try {
+      child.kill(signal);
+    } catch {
+      /* gone */
+    }
+  }
+}
+
+function copyTrial(src, dest) {
+  fs.mkdirSync(dest, { recursive: true });
+  const skipDirs = new Set(["agent", "artifacts"]);
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, entry.name);
+    const d = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === "qwen-sessions" || entry.name === "setup") continue;
+      if (skipDirs.has(entry.name) && entry.name === "artifacts") continue;
+      if (entry.name === "agent") {
+        fs.mkdirSync(d, { recursive: true });
+        for (const f of ["qwen-code.txt", "trajectory.json"]) {
+          const fp = path.join(s, f);
+          if (fs.existsSync(fp)) {
+            try {
+              const st = fs.statSync(fp);
+              if (st.size > 40 * 1024 * 1024) continue;
+              fs.copyFileSync(fp, path.join(d, f));
+            } catch {
+              /* best effort */
+            }
+          }
+        }
+        continue;
+      }
+      copyTrial(s, d);
+    } else {
+      try {
+        const st = fs.statSync(s);
+        if (st.size > 40 * 1024 * 1024) continue;
+        fs.copyFileSync(s, d);
+      } catch {
+        /* best effort */
+      }
+    }
+  }
+}
+
+function buildArgs(cfg, run, taskNames, jobName) {
+  const h = cfg.harbor;
+  const args = ["run", "-p", path.join(h.datasetDir, run.dataset), "-a", h.agent, "--ak", `version=${h.agentVersion}`, "-m", `openai/${run.model}`, "--base-url", `${cfg.omlx.baseUrl}/v1`, "-n", String(run.options.batchConcurrency), "-r", String(h.maxRetries)];
+  for (const e of h.retryInclude || []) args.push("--retry-include", e);
+  for (const n of taskNames) args.push("-i", n);
+  for (const n of h.envExtraArgs || []) args.push(n);
+  if (h.agentCacheDir && fs.existsSync(h.agentCacheDir)) {
+    args.push("--mounts", JSON.stringify([{ type: "bind", source: h.agentCacheDir, target: "/opt/qwen", read_only: true }]));
+  }
+  args.push("-o", path.join(runDir(run.id), "harbor"), "--job-name", jobName, "-y");
+  return args;
+}
+
+function collectBatchResults(run, records, batchDir, taskMeta) {
+  if (!fs.existsSync(batchDir)) return 0;
+  let added = 0;
+  let jobEntries = [];
+  try {
+    jobEntries = fs.readdirSync(batchDir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const jobEntry of jobEntries) {
+    if (!jobEntry.isDirectory()) continue;
+    const jobPath = path.join(batchDir, jobEntry.name);
+    let trials = [];
+    try {
+      trials = fs.readdirSync(jobPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const trial of trials) {
+      if (!trial.isDirectory() || !trial.name.includes("__")) continue;
+      const trialSrc = path.join(jobPath, trial.name);
+      const task = trial.name.split("__")[0];
+      if (!taskMeta[task]) continue;
+      const record = recordFromTrial(task, trialSrc, taskMeta[task]);
+      if (!record || record.reward === null) continue;
+      const dest = path.join(runDir(run.id), "trials", trial.name);
+      try {
+        copyTrial(trialSrc, dest);
+      } catch {
+        /* record still valid without artifacts */
+      }
+      record.trialDir = path.posix.join("trials", trial.name);
+      const prev = records.findIndex((r) => r.task === task);
+      if (prev >= 0) records.splice(prev, 1);
+      records.push(record);
+      added += 1;
+    }
+  }
+  if (added) {
+    records.sort((a, b) => String(a.startedAt || "").localeCompare(String(b.startedAt || "")));
+    saveRun(run, records);
+  }
+  return added;
+}
+
+function runBatch(cfg, run, taskNames, index, logFile) {
+  return new Promise((resolve) => {
+    const h = cfg.harbor;
+    const rt = runtime.get(run.id);
+    const args = buildArgs(cfg, run, taskNames, `batch-${String(index).padStart(3, "0")}`);
+    const env = {
+      ...process.env,
+      PATH: h.binary.includes("/") ? `${path.dirname(h.binary)}:${process.env.PATH}` : process.env.PATH,
+      OPENAI_API_KEY: cfg.omlx.apiKey || "",
+    };
+    if (h.dockerHost) env.DOCKER_HOST = h.dockerHost;
+    fs.appendFileSync(logFile, `\n$ ${h.binary} ${args.join(" ")}\n`);
+    const child = spawn(h.binary, args, { cwd: cfg.harbor.datasetDir, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    rt.child = child;
+    const onData = (chunk) => {
+      try {
+        fs.appendFileSync(logFile, chunk);
+      } catch {
+        /* ignore */
+      }
+    };
+    child.stdout.on("data", onData);
+    child.stderr.on("data", onData);
+
+    let timedOut = false;
+    const capMs = (run.options.batchTimeoutMin || 300) * 60_000;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      fs.appendFileSync(logFile, `\n[runner] batch exceeded ${run.options.batchTimeoutMin} min, terminating\n`);
+      killTree(child, "SIGTERM");
+      setTimeout(() => killTree(child, "SIGKILL"), 20_000).unref();
+    }, capMs);
+
+    child.on("exit", (code, signal) => {
+      clearTimeout(timer);
+      rt.child = null;
+      resolve({ code, signal, timedOut });
+    });
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      rt.child = null;
+      fs.appendFileSync(logFile, `\n[runner] spawn failed: ${err.message}\n`);
+      resolve({ code: -1, signal: null, timedOut: false, spawnError: err.message });
+    });
+  });
+}
+
+async function loop(cfg, run) {
+  const rt = runtime.get(run.id);
+  const dir = runDir(run.id);
+  const logFile = path.join(dir, "runner.log");
+  const records = readResults(run.id);
+  const done = new Set(records.filter((r) => r.scored).map((r) => r.task));
+  const pending = run.tasks.filter((t) => !done.has(t.name));
+  run.status = "running";
+  run.startedAt ||= new Date().toISOString();
+  run.currentBatch = null;
+  saveRun(run, records);
+
+  const taskMeta = {};
+  for (const t of run.tasks) taskMeta[t.name] = t;
+
+  let i = Number(run.batchCursor || 0);
+  try {
+    for (let pos = 0; pos < pending.length; pos += run.options.batchConcurrency) {
+      if (rt.cancelRequested) break;
+      if (rt.pauseRequested) {
+        run.status = "paused";
+        run.batchCursor = i;
+        run.note = "Paused between batches. You can resume at any time.";
+        saveRun(run, records);
+        return;
+      }
+      const group = pending.slice(pos, pos + run.options.batchConcurrency).map((t) => t.name);
+      const batchDir = path.join(dir, "harbor");
+      fs.mkdirSync(batchDir, { recursive: true });
+      run.currentBatch = { index: i, tasks: group, startedAt: new Date().toISOString() };
+      run.status = "running";
+      saveRun(run, records);
+      const res = await runBatch(cfg, run, group, i, logFile);
+      collectBatchResults(run, records, batchDir, taskMeta);
+      run.lastBatchExit = { code: res.code, signal: res.signal, timedOut: !!res.timedOut, spawnError: res.spawnError || null };
+      i += 1;
+      run.batchCursor = i;
+      run.currentBatch = null;
+      if (rt.cancelRequested) break;
+      if (rt.pauseRequested) {
+        run.status = "paused";
+        run.note = "Paused between batches. You can resume at any time.";
+        saveRun(run, records);
+        return;
+      }
+      saveRun(run, records);
+      if (res.spawnError) {
+        run.status = "error";
+        run.note = `harbor failed to start: ${res.spawnError}`;
+        saveRun(run, records);
+        return;
+      }
+    }
+    const remaining = run.tasks.filter((t) => !records.some((r) => r.scored && r.task === t.name));
+    if (rt.cancelRequested) {
+      run.status = "canceled";
+      run.note = "Stopped. Completed task results are kept.";
+    } else if (remaining.length === 0) {
+      run.status = "completed";
+      run.finishedAt = new Date().toISOString();
+    } else {
+      run.status = "paused";
+      run.note = `${remaining.length} task(s) have no score yet. Resume to continue.`;
+    }
+    saveRun(run, records);
+    notify(run);
+  } catch (err) {
+    run.status = "error";
+    run.note = String(err?.message || err);
+    saveRun(run, records);
+  } finally {
+    runtime.delete(run.id);
+  }
+}
+
+function notify(run) {
+  if (!run.notify) return;
+  const s = run.summary || {};
+  const title = `Benchmark ${run.status === "completed" ? "complete" : run.status}`;
+  const body = `${run.model}: ${s.passed ?? 0}/${s.scored ?? 0} passed (leak-checked ${s.cleanPct ?? "n/a"}%)`;
+  const script = `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)}`;
+  try {
+    spawn("osascript", ["-e", script], { detached: true, stdio: "ignore" }).unref();
+  } catch {
+    /* notifications are optional */
+  }
+}
+
+export function isBusy(id) {
+  return runtime.has(id);
+}
+
+export async function createRun(cfg, payload) {
+  const datasetDir = path.join(cfg.harbor.datasetDir, payload.dataset || cfg.harbor.defaultDataset);
+  const all = listTasks(datasetDir);
+  if (!all.length) throw new Error(`No tasks found in: ${datasetDir}`);
+  const tasks = filterTasks(all, {
+    include: payload.includeTaskNames || [],
+    exclude: [...(cfg.harbor.excludeTaskNames || []), ...(payload.excludeTaskNames || [])],
+  });
+  if (!tasks.length) throw new Error("No tasks left after filtering");
+  const id = payload.id || stampId();
+  const dir = runDir(id);
+  fs.mkdirSync(dir, { recursive: true });
+  const machine = await machineSnapshot(cfg).catch((e) => ({ capturedAt: new Date().toISOString(), error: String(e.message || e) }));
+  machine.local = { hostname: os.hostname(), platform: `${os.type()} ${os.release()}`, arch: os.arch(), cpus: os.cpus().length, totalMemoryGb: +(os.totalmem() / 1024 ** 3).toFixed(1), node: process.version, role: "benchmark controller" };
+  const run = {
+    id,
+    name: payload.name || `${payload.model} · ${new Date().toLocaleString("zh-TW")}`,
+    model: payload.model,
+    dataset: payload.dataset || cfg.harbor.defaultDataset,
+    baseUrl: cfg.omlx.baseUrl,
+    agent: cfg.harbor.agent,
+    agentVersion: cfg.harbor.agentVersion,
+    options: {
+      batchConcurrency: Math.max(1, Math.min(8, Number(payload.batchConcurrency) || cfg.harbor.batchConcurrency)),
+      batchTimeoutMin: Math.max(15, Number(payload.batchTimeoutMin) || cfg.harbor.runTimeoutMin),
+      preload: payload.preload !== false,
+    },
+    notify: cfg.notify !== false,
+    status: "queued",
+    createdAt: new Date().toISOString(),
+    startedAt: null,
+    finishedAt: null,
+    batchCursor: 0,
+    currentBatch: null,
+    machine,
+    modelInfo: payload.modelInfo || null,
+    tasks,
+    note: null,
+  };
+  saveRun(run, []);
+  return run;
+}
+
+export async function startRun(cfg, id) {
+  const run = readRun(id);
+  if (!run) throw new Error("Run not found");
+  if (runtime.has(id)) return { started: false, reason: "already-running", run };
+  const rt = { child: null, pauseRequested: false, cancelRequested: false };
+  runtime.set(id, rt);
+  run.status = "running";
+  run.note = null;
+  saveRun(run);
+  (async () => {
+    if (run.options.preload) {
+      try {
+        const p = await preloadCheck(cfg, run.model);
+        fs.appendFileSync(path.join(runDir(id), "runner.log"), `\n[runner] preload ok ${p.model} in ${p.seconds.toFixed(1)}s\n`);
+        run.preloadSeconds = p.seconds;
+        saveRun(run);
+      } catch (e) {
+        fs.appendFileSync(path.join(runDir(id), "runner.log"), `\n[runner] preload failed: ${e.message}\n`);
+        run.status = "error";
+        run.note = `Model load failed: ${e.message}`;
+        saveRun(run);
+        runtime.delete(id);
+        return;
+      }
+    }
+    await loop(cfg, run);
+  })();
+  return { started: true, run };
+}
+
+export function pauseRun(id, { force = false } = {}) {
+  const rt = runtime.get(id);
+  const run = readRun(id);
+  if (!run) return { ok: false, reason: "not-found" };
+  if (!rt) {
+    run.status = "paused";
+    run.note = "Paused (no active batch).";
+    saveRun(run);
+    return { ok: true, mode: "idle", run };
+  }
+  rt.pauseRequested = true;
+  if (force) killTree(rt.child, "SIGTERM");
+  run.note = force ? "Stopping the current batch (unfinished tasks will re-run)…" : "Pausing after the current batch…";
+  saveRun(run);
+  return { ok: true, mode: force ? "force" : "graceful", run };
+}
+
+export function cancelRun(id) {
+  const rt = runtime.get(id);
+  const run = readRun(id);
+  if (!run) return { ok: false, reason: "not-found" };
+  if (rt) {
+    rt.cancelRequested = true;
+    killTree(rt.child, "SIGTERM");
+    setTimeout(() => killTree(rt.child, "SIGKILL"), 20_000).unref();
+  }
+  run.status = "canceled";
+  run.note = "Stopped. Completed task results are kept.";
+  saveRun(run);
+  return { ok: true, run };
+}
+
+export function deleteRun(id) {
+  if (runtime.has(id)) return { ok: false, reason: "running" };
+  const dir = runDir(id);
+  if (!fs.existsSync(dir)) return { ok: false, reason: "not-found" };
+  fs.rmSync(dir, { recursive: true, force: true });
+  return { ok: true };
+}
+
+export function runView(cfg, run) {
+  if (!run) return null;
+  const records = readResults(run.id);
+  const rt = runtime.get(run.id);
+  const done = new Set(records.filter((r) => r.scored).map((r) => r.task));
+  const elapsed = run.startedAt ? (Date.now() - Date.parse(run.startedAt)) / 1000 : 0;
+  const durations = records.map((r) => r.durationSec).filter((x) => x != null);
+  const remainingTasks = run.tasks.filter((t) => !done.has(t.name));
+  const eta = durations.length ? (durations.reduce((a, b) => a + b, 0) / durations.length) * remainingTasks.length / Math.max(1, run.options.batchConcurrency) : null;
+  return {
+    ...run,
+    runtime: { active: !!rt, childPid: rt?.child?.pid ?? null, pauseRequested: !!rt?.pauseRequested, cancelRequested: !!rt?.cancelRequested },
+    records,
+    progress: { total: run.tasks.length, done: done.size, remaining: remainingTasks.length, elapsedSec: Math.round(elapsed), etaSec: eta ? Math.round(eta) : null },
+    logTail: tail(path.join(runDir(run.id), "runner.log"), 120),
+    runningOrphan: !rt && run.status === "running",
+  };
+}
+
+export function markOrphansInterrupted() {
+  for (const run of listRuns()) {
+    if (runtime.has(run.id)) continue;
+    if (run.status === "running" || run.status === "queued") {
+      run.status = "paused";
+      run.note = "Interrupted by a service restart. Resume to continue.";
+      saveRun(run);
+    }
+  }
+}
+
+export function importRun(cfg, payload) {
+  const id = payload.id || `import-${stampId()}`;
+  const dir = runDir(id);
+  fs.mkdirSync(dir, { recursive: true });
+  const datasetDir = path.join(cfg.harbor.datasetDir, payload.dataset || cfg.harbor.defaultDataset);
+  const meta = {};
+  for (const t of listTasks(datasetDir)) meta[t.name] = t;
+  const incoming = (payload.records || []).map((r) => ({
+    task: r.task,
+    passed: !!r.passed,
+    reward: r.reward ?? (r.passed ? 1 : 0),
+    scored: r.scored !== false,
+    flags: r.flags || [],
+    flagged: !!(r.flags && r.flags.length),
+    durationSec: r.durationSec ?? null,
+    timedOut: !!r.timedOut,
+    toolCalls: r.toolCalls ?? 0,
+    inputTokens: r.inputTokens ?? 0,
+    outputTokens: r.outputTokens ?? 0,
+    cacheTokens: r.cacheTokens ?? 0,
+    difficulty: r.difficulty || meta[r.task]?.difficulty || null,
+    category: r.category || meta[r.task]?.category || null,
+    exceptionType: r.exceptionType || null,
+    startedAt: r.startedAt || null,
+    finishedAt: r.finishedAt || null,
+    trialDir: null,
+  }));
+  const taskNames = new Set(incoming.map((r) => r.task));
+  const run = {
+    id,
+    name: payload.name || `${payload.model} · imported`,
+    model: payload.model,
+    dataset: payload.dataset || cfg.harbor.defaultDataset,
+    baseUrl: payload.baseUrl || "external",
+    agent: payload.agent || cfg.harbor.agent,
+    agentVersion: payload.agentVersion || null,
+    options: { batchConcurrency: 1, batchTimeoutMin: 60, preload: false },
+    notify: false,
+    status: "imported",
+    createdAt: payload.createdAt || new Date().toISOString(),
+    startedAt: null,
+    finishedAt: null,
+    batchCursor: 0,
+    currentBatch: null,
+    machine: payload.machine || { capturedAt: null, note: "External import, no host snapshot" },
+    modelInfo: payload.modelInfo || null,
+    tasks: [...taskNames].sort().map((name) => meta[name] || { name, difficulty: "unknown", category: "unknown", agentTimeoutSec: null }),
+    note: payload.note || "Imported from existing results",
+  };
+  saveRun(run, incoming);
+  return run;
+}

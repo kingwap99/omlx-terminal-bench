@@ -13,6 +13,15 @@ article.
   one-concurrency run was taking too long on this hardware. Partial results are
   in `data/full-run-partial.json`; no full-suite q4 percentage is available.
 
+## Runner app
+
+`app/` contains a self-hosted web app that runs the same Terminal-Bench method
+against any model oMLX exposes: pick a model, choose tasks, track progress,
+pause and resume, keep every run on disk with the host's chip / DRAM / GPU
+specs, and compare runs (including these article rows) side by side.
+
+See [app/README.md](app/README.md) for setup and usage.
+
 ## Subset results
 
 All three models ran the same 18 tasks with Qwen Code 0.26.7, one attempt per

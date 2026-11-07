@@ -1,0 +1,8 @@
+version = "1.0"
+
+[metadata]
+difficulty = "medium"
+category = "test-cat"
+
+[agent]
+timeout_sec = 120.0
