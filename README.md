@@ -8,9 +8,10 @@ article.
 ## Status
 
 - The 18-task stratified subset is complete for all three oMLX models.
-- The full 86-task Terminal-Bench 2.0 suite for
-  `Qwen3.8-Flash-Next-oQ4e-mtp` is running at one concurrency and will be added
-  when it finishes.
+- The full 86-task Terminal-Bench 2.0 run for
+  `Qwen3.8-Flash-Next-oQ4e-mtp` was stopped after 3 completed tasks because the
+  one-concurrency run was taking too long on this hardware. Partial results are
+  in `data/full-run-partial.json`; no full-suite q4 percentage is available.
 
 ## Subset results
 

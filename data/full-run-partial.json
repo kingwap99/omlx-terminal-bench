@@ -1,0 +1,27 @@
+{
+  "model": "Qwen3.8-Flash-Next-oQ4e-mtp",
+  "suite": "terminal-bench-2.0-86-scored-tasks",
+  "status": "stopped",
+  "concurrency": 1,
+  "completed_tasks": 3,
+  "passed": 1,
+  "failed": 2,
+  "results": [
+    {
+      "task": "adaptive-rejection-sampler",
+      "passed": false,
+      "exception": "AgentTimeoutError"
+    },
+    {
+      "task": "bn-fit-modify",
+      "passed": true,
+      "exception": null
+    },
+    {
+      "task": "break-filter-js-from-html",
+      "passed": false,
+      "exception": null
+    }
+  ],
+  "note": "Run stopped at the user's request. These three tasks are not a full-suite score."
+}
