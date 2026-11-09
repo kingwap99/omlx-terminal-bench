@@ -135,6 +135,7 @@ $("btnStart").addEventListener("click", async () => {
         excludeTaskNames: $("txtExclude").value.split(/\n+/).map((s) => s.trim()).filter(Boolean),
         batchTimeoutMin: Number($("numTimeout").value) || 300,
         agentTimeoutMultiplier: Number($("numTimeoutMult").value) || 1,
+        nAttempts: Number($("numAttempts").value) || 1,
         preload: $("chkPreload").checked,
       }),
     });
@@ -195,14 +196,43 @@ async function refreshRunDetail() {
   const machine = r.machine || {};
   const pctDone = p.total ? Math.round((100 * p.done) / p.total) : 0;
   const recs = (r.records || []).slice().sort((a, b) => String(a.task).localeCompare(String(b.task)));
-  const rows = recs.map((x) => `<tr class="${x.passed ? "ok-flag" : x.scored ? "bad-flag" : ""}">
-      <td>${esc(x.task)}</td><td>${esc(x.difficulty || "—")}</td>
-      <td>${x.scored ? (x.passed ? '<span class="pass">✅ pass</span>' : x.timedOut ? '<span class="fail">⏱ timeout</span>' : '<span class="fail">❌ fail</span>') : `<span class="muted">${esc(x.exceptionType || "unscored")}</span>`}</td>
-      <td class="num">${x.durationSec != null ? fmtMin(x.durationSec / 60) : "—"}</td>
-      <td class="num">${x.toolCalls ?? 0}</td><td class="num">${((x.inputTokens || 0) / 1000).toFixed(0)}K/${((x.outputTokens || 0) / 1000).toFixed(1)}K</td>
-      <td class="num" title="${x.totalTps != null ? `total ${x.totalTps} tok/s including prompt` : ""}">${x.outputTps != null ? x.outputTps : x.durationSec && x.outputTokens ? (x.outputTokens / x.durationSec).toFixed(1) : "—"}</td>
-      <td>${x.flagged ? `⚠ ${esc((x.flags || []).join(", "))}` : "—"}</td></tr>`).join("");
-  const pending = r.tasks.filter((t) => !recs.some((x) => x.task === t.name && x.scored)).map((t) => t.name);
+  const byTask = new Map();
+  for (const x of recs) {
+    if (!byTask.has(x.task)) byTask.set(x.task, []);
+    byTask.get(x.task).push(x);
+  }
+  const rows = [...byTask.entries()].map(([task, list]) => {
+    const first = list[0];
+    const multi = list.length > 1;
+    const passedN = list.filter((x) => x.passed).length;
+    const timeouts = list.filter((x) => x.timedOut).length;
+    let resultCell;
+    if (multi) {
+      const cls = passedN === list.length ? "pass" : passedN > 0 ? "" : "fail";
+      resultCell = `<span class="${cls}">${passedN}/${list.length} pass</span>` + (timeouts ? ` <span class="muted">⏱${timeouts}</span>` : "");
+    } else if (!first.scored) {
+      resultCell = `<span class="muted">${esc(first.exceptionType || "unscored")}</span>`;
+    } else {
+      resultCell = first.passed ? '<span class="pass">✅ pass</span>' : first.timedOut ? '<span class="fail">⏱ timeout</span>' : '<span class="fail">❌ fail</span>';
+    }
+    const durSum = list.reduce((a, x) => a + (x.durationSec || 0), 0);
+    const tokIn = list.reduce((a, x) => a + (x.inputTokens || 0), 0);
+    const tokOut = list.reduce((a, x) => a + (x.outputTokens || 0), 0);
+    const tools = list.reduce((a, x) => a + (x.toolCalls || 0), 0);
+    const tps = durSum ? (tokOut / durSum).toFixed(1) : "—";
+    const flagged = list.find((x) => x.flagged);
+    const rowCls = passedN === list.length ? "ok-flag" : passedN > 0 ? "" : "bad-flag";
+    const timeCell = multi ? list.map((x) => fmtMin((x.durationSec || 0) / 60)).join(" / ") : first.durationSec != null ? fmtMin(first.durationSec / 60) : "—";
+    return `<tr class="${rowCls}">
+      <td>${esc(task)}</td><td>${esc(first.difficulty || "—")}</td>
+      <td>${resultCell}</td>
+      <td class="num">${timeCell}</td>
+      <td class="num">${tools}</td><td class="num">${(tokIn / 1000).toFixed(0)}K/${(tokOut / 1000).toFixed(1)}K</td>
+      <td class="num">${tps}</td>
+      <td>${flagged ? `⚠ ${esc((flagged.flags || []).join(", "))}` : "—"}</td></tr>`;
+  }).join("");
+  const nAtt = Number(r.options?.nAttempts || 1);
+  const pending = r.tasks.filter((t) => recs.filter((x) => x.task === t.name && x.scored).length < nAtt).map((t) => t.name);
   const cur = r.currentBatch ? `Current batch: ${r.currentBatch.tasks.join(", ")}` : "";
   $("runDetail").innerHTML = `<div class="card">
     <h2>${esc(r.name)} ${statusBadge(r.status)}</h2>
@@ -213,6 +243,7 @@ async function refreshRunDetail() {
       <div><b>Model</b>${esc(r.model)}</div><div><b>Agent</b>${esc(r.agent)} ${esc(r.agentVersion || "")}</div>
       <div><b>Dataset</b>${esc(r.dataset)} (${p.total} tasks)</div><div><b>Run mode</b>${(r.options?.batchConcurrency ?? 1) === 1 ? "serial" : "parallel ×" + r.options.batchConcurrency}</div>
       <div><b>Agent timeout</b>${r.options?.agentTimeoutMultiplier && r.options.agentTimeoutMultiplier !== 1 ? `×${r.options.agentTimeoutMultiplier}` : "dataset default"}</div>
+      <div><b>Attempts per task</b>${nAtt}${nAtt > 1 ? ` · all-attempt pass ${s.taskPassedAll ?? 0}/${s.taskScored ?? 0} · any ${s.taskPassedAny ?? 0}/${s.taskScored ?? 0}` : ""}</div>
       <div><b>Leak-checked</b>${fmtPct(s.cleanPct)} (${s.cleanPassed ?? 0}/${s.clean ?? 0})</div><div><b>Raw pass</b>${s.passed ?? 0}/${s.scored ?? 0} (${fmtPct(s.rawPct)})</div>
       <div><b>Timeouts</b>${s.timeouts ?? 0}</div><div><b>Leak flags</b>${s.flagged ?? 0} (${s.flaggedPasses ?? 0} passing)</div>
       <div><b>Median time</b>${fmtMin(s.medianMin)}</div><div><b>By difficulty</b>${Object.entries(s.byDifficulty || {}).map(([k, v]) => `${k} ${v.rawPct}%`).join(", ") || "—"}</div>
@@ -324,8 +355,10 @@ async function loadSettings() {
   $("cfgAgentVersion").value = c.harbor.agentVersion;
   $("cfgRunTimeout").value = c.harbor.runTimeoutMin;
   $("cfgTimeoutMult").value = c.harbor.agentTimeoutMultiplier ?? 1;
+  $("cfgAttempts").value = c.harbor.nAttempts ?? 1;
   /* New-run form starts from the configured default. */
   if (document.activeElement !== $("numTimeoutMult")) $("numTimeoutMult").value = c.harbor.agentTimeoutMultiplier ?? 1;
+  if (document.activeElement !== $("numAttempts")) $("numAttempts").value = c.harbor.nAttempts ?? 1;
   $("cfgNotify").checked = !!c.notify;
 }
 $("btnSaveCfg").addEventListener("click", async () => {
@@ -339,7 +372,7 @@ $("btnSaveCfg").addEventListener("click", async () => {
 $("btnSaveHarbor").addEventListener("click", async () => {
   await api("/api/config", {
     method: "PUT",
-    body: JSON.stringify({ harbor: { agentVersion: $("cfgAgentVersion").value.trim(), runTimeoutMin: Number($("cfgRunTimeout").value), agentTimeoutMultiplier: Number($("cfgTimeoutMult").value) || 1 }, notify: $("cfgNotify").checked }),
+    body: JSON.stringify({ harbor: { agentVersion: $("cfgAgentVersion").value.trim(), runTimeoutMin: Number($("cfgRunTimeout").value), agentTimeoutMultiplier: Number($("cfgTimeoutMult").value) || 1, nAttempts: Number($("cfgAttempts").value) || 1 }, notify: $("cfgNotify").checked }),
   });
   cfgCache = null;
   const mult = Number($("cfgTimeoutMult").value) || 1;

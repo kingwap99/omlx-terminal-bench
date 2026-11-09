@@ -46,6 +46,7 @@
         <div class="row">
           <label>Batch cap (min) <input id="numTimeout" type="number" min="15" value="300" /></label>
           <label>Agent timeout × <input id="numTimeoutMult" type="number" min="0.25" max="8" step="0.25" value="1" /></label>
+          <label>Attempts per task <input id="numAttempts" type="number" min="1" max="5" value="1" /></label>
         </div>
         <p class="muted">Limits come from each task.toml (900 s for 49 of 89 tasks); "Agent timeout ×" scales them for slower hosts. Runs execute one task at a time, so pause takes effect between tasks.</p>
       </div>
@@ -91,6 +92,7 @@
         <label>Agent version <input id="cfgAgentVersion" /></label>
         <label>Batch cap (min) <input id="cfgRunTimeout" type="number" min="15" /></label>
         <label>Default agent timeout × <input id="cfgTimeoutMult" type="number" min="0.25" max="8" step="0.25" /></label>
+        <label>Default attempts per task <input id="cfgAttempts" type="number" min="1" max="5" /></label>
       </div>
       <div class="row"><label><input id="cfgNotify" type="checkbox" /> Send a macOS notification on completion</label></div>
       <button id="btnSaveHarbor" class="primary">Save runner settings</button>

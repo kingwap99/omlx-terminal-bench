@@ -148,6 +148,8 @@ function copyTrial(src, dest) {
 function buildArgs(cfg, run, taskNames, jobName) {
   const h = cfg.harbor;
   const args = ["run", "-p", path.join(h.datasetDir, run.dataset), "-a", h.agent, "--ak", `version=${h.agentVersion}`, "-m", `openai/${run.model}`, "--base-url", `${cfg.omlx.baseUrl}/v1`, "-n", String(run.options.batchConcurrency), "-r", String(h.maxRetries)];
+  const attempts = Number(run.options.nAttempts || 1);
+  if (attempts > 1) args.push("-k", String(attempts));
   const mult = Number(run.options.agentTimeoutMultiplier || 1);
   if (mult !== 1) args.push("--agent-timeout-multiplier", String(mult));
   for (const e of h.retryInclude || []) args.push("--retry-include", e);
@@ -210,9 +212,26 @@ function collectBatchResults(run, records, batchDir, taskMeta, jobName) {
         /* record still valid without artifacts */
       }
       record.trialDir = path.posix.join("trials", trial.name);
-      const prev = records.findIndex((r) => r.task === task);
-      if (prev >= 0) records.splice(prev, 1);
-      records.push(record);
+      const want = Number(run.options?.nAttempts || 1);
+      const existingCount = records.filter((r) => r.task === task).length;
+      if (want > 1) {
+        /* keep up to N attempts per task; a resume that re-runs an attempt
+           replaces the previous slot instead of stacking duplicates */
+        if (existingCount < want) {
+          record.attempt = existingCount + 1;
+          records.push(record);
+        } else {
+          record.attempt = existingCount;
+          const idx = records.findIndex((r) => r.task === task && r.attempt === existingCount);
+          if (idx >= 0) records.splice(idx, 1, record);
+          else records.push(record);
+        }
+      } else {
+        record.attempt = 1;
+        const prev = records.findIndex((r) => r.task === task);
+        if (prev >= 0) records.splice(prev, 1);
+        records.push(record);
+      }
       added += 1;
     }
   }
@@ -299,7 +318,10 @@ async function loop(cfg, run) {
         saveRun(run, records);
         return;
       }
-      const doneNow = new Set(records.filter((r) => r.scored).map((r) => r.task));
+      const want = Number(run.options?.nAttempts || 1);
+      const perTask = new Map();
+      for (const r of records) if (r.scored) perTask.set(r.task, (perTask.get(r.task) || 0) + 1);
+      const doneNow = new Set([...perTask].filter(([, c]) => c >= want).map(([t]) => t));
       const pendingNow = run.tasks.filter((t) => !doneNow.has(t.name));
       if (!pendingNow.length) break;
       const group = pendingNow.slice(0, run.options.batchConcurrency).map((t) => t.name);
@@ -350,7 +372,10 @@ async function loop(cfg, run) {
         return;
       }
     }
-    const remaining = run.tasks.filter((t) => !records.some((r) => r.scored && r.task === t.name));
+    const want = Number(run.options?.nAttempts || 1);
+    const perTask = new Map();
+    for (const r of records) if (r.scored) perTask.set(r.task, (perTask.get(r.task) || 0) + 1);
+    const remaining = run.tasks.filter((t) => (perTask.get(t.name) || 0) < want);
     if (rt.cancelRequested) {
       run.status = "canceled";
       run.note = "Stopped. Completed task results are kept.";
@@ -417,6 +442,7 @@ export async function createRun(cfg, payload) {
       batchConcurrency: 1,
       batchTimeoutMin: Math.max(15, Number(payload.batchTimeoutMin) || cfg.harbor.runTimeoutMin),
       agentTimeoutMultiplier: Math.max(0.25, Math.min(8, Number(payload.agentTimeoutMultiplier) || Number(cfg.harbor.agentTimeoutMultiplier) || 1)),
+      nAttempts: Math.max(1, Math.min(5, Math.round(Number(payload.nAttempts) || Number(cfg.harbor.nAttempts) || 1))),
       preload: payload.preload !== false,
     },
     notify: cfg.notify !== false,
@@ -518,7 +544,10 @@ export function runView(cfg, run) {
   if (!run) return null;
   const records = readResults(run.id);
   const rt = runtime.get(run.id);
-  const done = new Set(records.filter((r) => r.scored).map((r) => r.task));
+  const want = Number(run.options?.nAttempts || 1);
+  const perTask = new Map();
+  for (const r of records) if (r.scored) perTask.set(r.task, (perTask.get(r.task) || 0) + 1);
+  const done = new Set([...perTask].filter(([, c]) => c >= want).map(([t]) => t));
   const elapsed = run.startedAt ? (Date.now() - Date.parse(run.startedAt)) / 1000 : 0;
   const durations = records.map((r) => r.durationSec).filter((x) => x != null);
   const remainingTasks = run.tasks.filter((t) => !done.has(t.name));

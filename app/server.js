@@ -147,6 +147,7 @@ async function handle(req, res) {
             cfg.harbor.agentTimeoutMultiplier = Math.max(0.25, Math.min(8, Number(body.harbor.agentTimeoutMultiplier) || 1));
           }
           if (body.harbor.requireDocker !== undefined) cfg.harbor.requireDocker = !!body.harbor.requireDocker;
+          if (body.harbor.nAttempts !== undefined) cfg.harbor.nAttempts = Math.max(1, Math.min(5, Math.round(Number(body.harbor.nAttempts) || 1)));
         }
         if (body.notify !== undefined) cfg.notify = !!body.notify;
         saveConfig(cfg);

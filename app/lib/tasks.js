@@ -191,6 +191,16 @@ const pct = (n, d) => (d ? +((100 * n) / d).toFixed(1) : null);
 export function summarize(records) {
   const scored = records.filter((r) => r.scored);
   const passed = scored.filter((r) => r.passed);
+  const byTask = new Map();
+  for (const r of scored) {
+    const t = byTask.get(r.task) || { n: 0, passed: 0 };
+    t.n += 1;
+    if (r.passed) t.passed += 1;
+    byTask.set(r.task, t);
+  }
+  const taskPassedAll = [...byTask.values()].filter((t) => t.passed === t.n).length;
+  const taskPassedAny = [...byTask.values()].filter((t) => t.passed > 0).length;
+  const meanReward = scored.length ? +(scored.reduce((a, r) => a + Number(r.reward || 0), 0) / scored.length).toFixed(3) : null;
   const clean = scored.filter((r) => !r.flagged);
   const cleanPassed = clean.filter((r) => r.passed);
   const durations = scored.map((r) => r.durationSec);
@@ -212,8 +222,13 @@ export function summarize(records) {
   };
   return {
     trials: records.length,
+    attempts: scored.length,
     scored: scored.length,
     passed: passed.length,
+    taskScored: byTask.size,
+    taskPassedAll,
+    taskPassedAny,
+    meanReward,
     rawPct: pct(passed.length, scored.length),
     clean: clean.length,
     cleanPassed: cleanPassed.length,
