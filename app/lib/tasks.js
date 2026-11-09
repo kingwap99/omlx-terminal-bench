@@ -165,6 +165,12 @@ export function recordFromTrial(task, trialDir, meta = {}) {
     inputTokens: agentResult.n_input_tokens || 0,
     cacheTokens: agentResult.n_cache_tokens || 0,
     outputTokens: agentResult.n_output_tokens || 0,
+    /* effective generation rate over the agent's wall-clock time */
+    outputTps: duration && agentResult.n_output_tokens ? +(agentResult.n_output_tokens / duration).toFixed(1) : null,
+    totalTps:
+      duration && (agentResult.n_input_tokens || agentResult.n_output_tokens)
+        ? +(((agentResult.n_input_tokens || 0) + (agentResult.n_output_tokens || 0)) / duration).toFixed(1)
+        : null,
     difficulty: meta.difficulty || null,
     category: meta.category || null,
     exceptionType: exception.exception_type || null,

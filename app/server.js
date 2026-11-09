@@ -57,10 +57,11 @@ function csvEscape(v) {
 }
 
 function runToCsv(run, records) {
-  const head = ["run_id", "model", "task", "difficulty", "category", "passed", "reward", "flagged", "flags", "duration_sec", "timed_out", "tool_calls", "input_tokens", "output_tokens", "exception_type", "started_at", "finished_at"];
+  const head = ["run_id", "model", "task", "difficulty", "category", "passed", "reward", "flagged", "flags", "duration_sec", "timed_out", "tool_calls", "input_tokens", "output_tokens", "output_tps", "exception_type", "started_at", "finished_at"];
   const lines = [head.join(",")];
   for (const r of records) {
-    lines.push([run.id, run.model, r.task, r.difficulty, r.category, r.passed, r.reward, r.flagged, (r.flags || []).join("|"), r.durationSec, r.timedOut, r.toolCalls, r.inputTokens, r.outputTokens, r.exceptionType, r.startedAt, r.finishedAt].map(csvEscape).join(","));
+    const tps = r.outputTps ?? (r.durationSec && r.outputTokens ? +(r.outputTokens / r.durationSec).toFixed(1) : "");
+    lines.push([run.id, run.model, r.task, r.difficulty, r.category, r.passed, r.reward, r.flagged, (r.flags || []).join("|"), r.durationSec, r.timedOut, r.toolCalls, r.inputTokens, r.outputTokens, tps, r.exceptionType, r.startedAt, r.finishedAt].map(csvEscape).join(","));
   }
   return lines.join("\n");
 }

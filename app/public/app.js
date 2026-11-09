@@ -200,6 +200,7 @@ async function refreshRunDetail() {
       <td>${x.scored ? (x.passed ? '<span class="pass">✅ pass</span>' : x.timedOut ? '<span class="fail">⏱ timeout</span>' : '<span class="fail">❌ fail</span>') : `<span class="muted">${esc(x.exceptionType || "unscored")}</span>`}</td>
       <td class="num">${x.durationSec != null ? fmtMin(x.durationSec / 60) : "—"}</td>
       <td class="num">${x.toolCalls ?? 0}</td><td class="num">${((x.inputTokens || 0) / 1000).toFixed(0)}K/${((x.outputTokens || 0) / 1000).toFixed(1)}K</td>
+      <td class="num" title="${x.totalTps != null ? `total ${x.totalTps} tok/s including prompt` : ""}">${x.outputTps != null ? x.outputTps : x.durationSec && x.outputTokens ? (x.outputTokens / x.durationSec).toFixed(1) : "—"}</td>
       <td>${x.flagged ? `⚠ ${esc((x.flags || []).join(", "))}` : "—"}</td></tr>`).join("");
   const pending = r.tasks.filter((t) => !recs.some((x) => x.task === t.name && x.scored)).map((t) => t.name);
   const cur = r.currentBatch ? `Current batch: ${r.currentBatch.tasks.join(", ")}` : "";
@@ -235,7 +236,7 @@ async function refreshRunDetail() {
         <button class="small danger" data-act="delete">Delete run</button>` : ""}
     </div>
     <h3>Per-task results</h3>
-    <div class="table-wrap"><table><thead><tr><th>Task</th><th>Difficulty</th><th>Result</th><th class="num">Time</th><th class="num">Tool calls</th><th class="num">tokens in/out</th><th>Leak check</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="muted">No completed tasks yet</td></tr>'}</tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Task</th><th>Difficulty</th><th>Result</th><th class="num">Time</th><th class="num">Tool calls</th><th class="num">tokens in/out</th><th class="num">tok/s</th><th>Leak check</th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="muted">No completed tasks yet</td></tr>'}</tbody></table></div>
     ${pending.length ? `<p class="muted">Pending: ${esc(pending.slice(0, 40).join(", "))}${pending.length > 40 ? `… (${pending.length} total)` : ""}</p>` : ""}
     <h3>Runner log (last 120 lines)</h3><div class="log">${esc(r.logTail || "(no log yet)")}</div>
   </div>`;
