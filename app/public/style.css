@@ -15,6 +15,7 @@ body { margin: 0; font-family: -apple-system, "PingFang TC", "Noto Sans TC", san
 header { padding: 14px 22px 0; border-bottom: 1px solid var(--line); background: var(--card); }
 .brand { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 h1 { font-size: 18px; margin: 0 8px 10px 0; }
+.version { font-size: 12px; font-weight: 500; color: var(--muted); letter-spacing: .02em; vertical-align: 2px; }
 h2 { font-size: 15px; margin: 0 0 10px; color: var(--text); }
 h3 { font-size: 14px; margin: 18px 0 8px; }
 nav { display: flex; gap: 6px; margin-top: 6px; }

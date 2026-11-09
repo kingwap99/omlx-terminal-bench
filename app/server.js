@@ -19,6 +19,13 @@ const MIME = {
 };
 
 let cfg = loadConfig();
+const APP_VERSION = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(APP_DIR, "package.json"), "utf8")).version || "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+})();
 runner.markOrphansInterrupted();
 
 function send(res, status, body, type = "application/json; charset=utf-8") {
@@ -120,6 +127,7 @@ async function handle(req, res) {
       /* ---------- config ---------- */
       if (p === "/api/config" && method === "GET") {
         return send(res, 200, {
+          version: APP_VERSION,
           port: cfg.port,
           omlx: { baseUrl: cfg.omlx.baseUrl, apiKeyMasked: maskKey(cfg.omlx.apiKey), hasKey: !!cfg.omlx.apiKey },
           harbor: cfg.harbor,

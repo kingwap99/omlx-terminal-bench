@@ -160,15 +160,20 @@ function buildArgs(cfg, run, taskNames, jobName) {
   return args;
 }
 
-function collectBatchResults(run, records, batchDir, taskMeta) {
+function collectBatchResults(run, records, batchDir, taskMeta, jobName) {
   if (!fs.existsSync(batchDir)) return 0;
   let added = 0;
   const mult = Number(run.options?.agentTimeoutMultiplier || 1);
-  let jobEntries = [];
-  try {
-    jobEntries = fs.readdirSync(batchDir, { withFileTypes: true });
-  } catch {
-    return 0;
+  /* Only ingest this batch's own job dir: a batch killed by pause/restart can
+     leave a partial trial (e.g. "service main is not running") that must not be
+     scored. */
+  const jobEntries = jobName ? [{ name: jobName, isDirectory: () => true }] : [];
+  if (!jobName) {
+    try {
+      jobEntries.push(...fs.readdirSync(batchDir, { withFileTypes: true }).filter((e) => e.isDirectory()));
+    } catch {
+      return 0;
+    }
   }
   for (const jobEntry of jobEntries) {
     if (!jobEntry.isDirectory()) continue;
@@ -188,6 +193,16 @@ function collectBatchResults(run, records, batchDir, taskMeta) {
       const scaled = meta && meta.agentTimeoutSec ? { ...meta, agentTimeoutSec: meta.agentTimeoutSec * mult } : meta;
       const record = recordFromTrial(task, trialSrc, scaled);
       if (!record || record.reward === null) continue;
+      /* The agent never produced a token and died almost immediately: that is a
+         runtime/API failure, not a wrong answer. Leave it pending so the retry
+         guard decides whether to surface it. */
+      const agentNeverRan =
+        !record.passed &&
+        (record.inputTokens || 0) + (record.outputTokens || 0) === 0 &&
+        (record.durationSec == null || record.durationSec < 90) &&
+        !!record.exceptionType &&
+        /ExitCode|UnknownApi|Container|Docker|Setup/i.test(record.exceptionType);
+      if (agentNeverRan) continue;
       const dest = path.join(runDir(run.id), "trials", trial.name);
       try {
         copyTrial(trialSrc, dest);
@@ -212,7 +227,8 @@ function runBatch(cfg, run, taskNames, index, logFile) {
   return new Promise((resolve) => {
     const h = cfg.harbor;
     const rt = runtime.get(run.id);
-    const args = buildArgs(cfg, run, taskNames, `batch-${String(index).padStart(3, "0")}`);
+    const jobName = `batch-${String(index).padStart(3, "0")}`;
+    const args = buildArgs(cfg, run, taskNames, jobName);
     const env = {
       ...process.env,
       PATH: h.binary.includes("/") ? `${path.dirname(h.binary)}:${process.env.PATH}` : process.env.PATH,
@@ -244,13 +260,13 @@ function runBatch(cfg, run, taskNames, index, logFile) {
     child.on("exit", (code, signal) => {
       clearTimeout(timer);
       rt.child = null;
-      resolve({ code, signal, timedOut });
+      resolve({ code, signal, timedOut, jobName });
     });
     child.on("error", (err) => {
       clearTimeout(timer);
       rt.child = null;
       fs.appendFileSync(logFile, `\n[runner] spawn failed: ${err.message}\n`);
-      resolve({ code: -1, signal: null, timedOut: false, spawnError: err.message });
+      resolve({ code: -1, signal: null, timedOut: false, spawnError: err.message, jobName });
     });
   });
 }
@@ -292,8 +308,8 @@ async function loop(cfg, run) {
       run.currentBatch = { index: i, tasks: group, startedAt: new Date().toISOString() };
       run.status = "running";
       saveRun(run, records);
-      const res = await runBatch(cfg, run, group, i, logFile);
-      const added = collectBatchResults(run, records, batchDir, taskMeta);
+    const res = await runBatch(cfg, run, group, i, logFile);
+      const added = collectBatchResults(run, records, batchDir, taskMeta, res.jobName);
       run.lastBatchExit = { code: res.code, signal: res.signal, timedOut: !!res.timedOut, spawnError: res.spawnError || null };
       i += 1;
       run.batchCursor = i;

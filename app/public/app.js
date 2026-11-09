@@ -316,6 +316,10 @@ $("btnCompare").addEventListener("click", async () => {
 async function loadSettings() {
   const c = await api("/api/config");
   cfgCache = c;
+  if (c.version) {
+    $("appVersion").textContent = `v${c.version}`;
+    document.title = `oMLX Terminal-Bench Runner v${c.version}`;
+  }
   $("cfgBaseUrl").value = c.omlx.baseUrl;
   $("cfgAgentVersion").value = c.harbor.agentVersion;
   $("cfgRunTimeout").value = c.harbor.runTimeoutMin;
