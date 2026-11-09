@@ -29,6 +29,7 @@ const DEFAULTS = {
     retryInclude: ["AgentSetupTimeoutError"],
     batchConcurrency: 4,
     runTimeoutMin: 300,
+    requireDocker: true,
     envExtraArgs: ["--no-force-build"],
   },
   notify: true,

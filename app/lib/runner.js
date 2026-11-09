@@ -86,6 +86,27 @@ function killTree(child, signal = "SIGTERM") {
   }
 }
 
+/* Is the container runtime reachable? Catches "colima is not running" before a
+   run burns through every batch in seconds. */
+function dockerCheck(cfg) {
+  return new Promise((resolve) => {
+    const h = cfg.harbor;
+    const env = { ...process.env };
+    if (h.dockerHost) env.DOCKER_HOST = h.dockerHost;
+    let out = "";
+    let child;
+    try {
+      child = spawn(process.env.DOCKER_BIN || "docker", ["info", "--format", "{{.ServerVersion}}"], { env, stdio: ["ignore", "pipe", "pipe"] });
+    } catch (e) {
+      return resolve({ ok: false, detail: String(e.message || e) });
+    }
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (out += d));
+    child.on("error", (e) => resolve({ ok: false, detail: e.message }));
+    child.on("exit", (code) => resolve({ ok: code === 0, detail: out.trim().slice(0, 400) }));
+  });
+}
+
 function copyTrial(src, dest) {
   fs.mkdirSync(dest, { recursive: true });
   const skipDirs = new Set(["agent", "artifacts"]);
@@ -262,7 +283,7 @@ async function loop(cfg, run) {
       run.status = "running";
       saveRun(run, records);
       const res = await runBatch(cfg, run, group, i, logFile);
-      collectBatchResults(run, records, batchDir, taskMeta);
+      const added = collectBatchResults(run, records, batchDir, taskMeta);
       run.lastBatchExit = { code: res.code, signal: res.signal, timedOut: !!res.timedOut, spawnError: res.spawnError || null };
       i += 1;
       run.batchCursor = i;
@@ -271,6 +292,17 @@ async function loop(cfg, run) {
       if (rt.pauseRequested) {
         run.status = "paused";
         run.note = "Paused between batches. You can resume at any time.";
+        saveRun(run, records);
+        return;
+      }
+      /* A batch that exits non-zero without producing a single result is an
+         infrastructure failure (docker down, bad mount, auth), not a task
+         failure. Stop here instead of marching through the whole queue. */
+      if (added === 0 && res.code !== 0) {
+        const tailText = tail(logFile, 12).split("\n").filter((l) => l.trim() && !l.startsWith("$ ")).slice(-3).join(" ");
+        run.status = "error";
+        run.note = `Batch ${i - 1} produced no results (harbor exit ${res.code}). ${tailText || "See runner log."}`;
+        run.lastBatchExit = { ...run.lastBatchExit, infraFailure: true };
         saveRun(run, records);
         return;
       }
@@ -368,6 +400,15 @@ export async function startRun(cfg, id) {
   const run = readRun(id);
   if (!run) throw new Error("Run not found");
   if (runtime.has(id)) return { started: false, reason: "already-running", run };
+  if (cfg.harbor.requireDocker !== false) {
+    const docker = await dockerCheck(cfg);
+    if (!docker.ok) {
+      run.status = "error";
+      run.note = `Container runtime unreachable: ${docker.detail || "docker info failed"}. Start Docker (Colima), then press Resume.`;
+      saveRun(run);
+      return { started: false, reason: "docker-unavailable", run };
+    }
+  }
   const rt = { child: null, pauseRequested: false, cancelRequested: false };
   runtime.set(id, rt);
   run.status = "running";
