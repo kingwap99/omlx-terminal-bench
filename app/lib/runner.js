@@ -261,7 +261,6 @@ async function loop(cfg, run) {
   const logFile = path.join(dir, "runner.log");
   const records = readResults(run.id);
   const done = new Set(records.filter((r) => r.scored).map((r) => r.task));
-  const pending = run.tasks.filter((t) => !done.has(t.name));
   run.status = "running";
   run.startedAt ||= new Date().toISOString();
   run.currentBatch = null;
@@ -271,8 +270,11 @@ async function loop(cfg, run) {
   for (const t of run.tasks) taskMeta[t.name] = t;
 
   let i = Number(run.batchCursor || 0);
+  const attempts = {};
   try {
-    for (let pos = 0; pos < pending.length; pos += run.options.batchConcurrency) {
+    /* Recompute the queue every round: a restart can leave finished trials on
+       disk that were ingested after the queue was built. */
+    for (;;) {
       if (rt.cancelRequested) break;
       if (rt.pauseRequested) {
         run.status = "paused";
@@ -281,7 +283,10 @@ async function loop(cfg, run) {
         saveRun(run, records);
         return;
       }
-      const group = pending.slice(pos, pos + run.options.batchConcurrency).map((t) => t.name);
+      const doneNow = new Set(records.filter((r) => r.scored).map((r) => r.task));
+      const pendingNow = run.tasks.filter((t) => !doneNow.has(t.name));
+      if (!pendingNow.length) break;
+      const group = pendingNow.slice(0, run.options.batchConcurrency).map((t) => t.name);
       const batchDir = path.join(dir, "harbor");
       fs.mkdirSync(batchDir, { recursive: true });
       run.currentBatch = { index: i, tasks: group, startedAt: new Date().toISOString() };
@@ -310,6 +315,16 @@ async function loop(cfg, run) {
         run.lastBatchExit = { ...run.lastBatchExit, infraFailure: true };
         saveRun(run, records);
         return;
+      }
+      if (added === 0) {
+        for (const name of group) attempts[name] = (attempts[name] || 0) + 1;
+        const stuck = group.filter((name) => attempts[name] >= 2);
+        if (stuck.length) {
+          run.status = "error";
+          run.note = `harbor finished without a result for ${stuck.join(", ")} (2 attempts). Check that trial's log.`;
+          saveRun(run, records);
+          return;
+        }
       }
       saveRun(run, records);
       if (res.spawnError) {
@@ -381,7 +396,9 @@ export async function createRun(cfg, payload) {
     agent: cfg.harbor.agent,
     agentVersion: cfg.harbor.agentVersion,
     options: {
-      batchConcurrency: Math.max(1, Math.min(8, Number(payload.batchConcurrency) || cfg.harbor.batchConcurrency)),
+      /* Serial by design: one task at a time, so a task's wall-clock budget is not
+         split between trials queued on a single-stream model server. */
+      batchConcurrency: 1,
       batchTimeoutMin: Math.max(15, Number(payload.batchTimeoutMin) || cfg.harbor.runTimeoutMin),
       agentTimeoutMultiplier: Math.max(0.25, Math.min(8, Number(payload.agentTimeoutMultiplier) || Number(cfg.harbor.agentTimeoutMultiplier) || 1)),
       preload: payload.preload !== false,

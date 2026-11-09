@@ -133,7 +133,6 @@ $("btnStart").addEventListener("click", async () => {
         dataset: $("selDataset").value,
         includeTaskNames: $("txtInclude").value.trim().split(/[\s,]+/).filter(Boolean),
         excludeTaskNames: $("txtExclude").value.split(/\n+/).map((s) => s.trim()).filter(Boolean),
-        batchConcurrency: Number($("numConcurrency").value) || 4,
         batchTimeoutMin: Number($("numTimeout").value) || 300,
         agentTimeoutMultiplier: Number($("numTimeoutMult").value) || 1,
         preload: $("chkPreload").checked,
@@ -211,7 +210,7 @@ async function refreshRunDetail() {
     <p class="muted">Progress ${p.done}/${p.total} (${pctDone}%) · elapsed ${fmtMin((p.elapsedSec || 0) / 60)}${p.etaSec != null && r.status === "running" ? ` · ETA ${fmtMin(p.etaSec / 60)}` : ""}　${esc(cur)}</p>
     <div class="kv">
       <div><b>Model</b>${esc(r.model)}</div><div><b>Agent</b>${esc(r.agent)} ${esc(r.agentVersion || "")}</div>
-      <div><b>Dataset</b>${esc(r.dataset)} (${p.total} tasks)</div><div><b>Batch size</b>${r.options?.batchConcurrency ?? "—"}</div>
+      <div><b>Dataset</b>${esc(r.dataset)} (${p.total} tasks)</div><div><b>Run mode</b>${(r.options?.batchConcurrency ?? 1) === 1 ? "serial" : "parallel ×" + r.options.batchConcurrency}</div>
       <div><b>Agent timeout</b>${r.options?.agentTimeoutMultiplier && r.options.agentTimeoutMultiplier !== 1 ? `×${r.options.agentTimeoutMultiplier}` : "dataset default"}</div>
       <div><b>Leak-checked</b>${fmtPct(s.cleanPct)} (${s.cleanPassed ?? 0}/${s.clean ?? 0})</div><div><b>Raw pass</b>${s.passed ?? 0}/${s.scored ?? 0} (${fmtPct(s.rawPct)})</div>
       <div><b>Timeouts</b>${s.timeouts ?? 0}</div><div><b>Leak flags</b>${s.flagged ?? 0} (${s.flaggedPasses ?? 0} passing)</div>
@@ -318,7 +317,6 @@ async function loadSettings() {
   cfgCache = c;
   $("cfgBaseUrl").value = c.omlx.baseUrl;
   $("cfgAgentVersion").value = c.harbor.agentVersion;
-  $("cfgConcurrency").value = c.harbor.batchConcurrency;
   $("cfgRunTimeout").value = c.harbor.runTimeoutMin;
   $("cfgTimeoutMult").value = c.harbor.agentTimeoutMultiplier ?? 1;
   $("cfgNotify").checked = !!c.notify;
@@ -334,7 +332,7 @@ $("btnSaveCfg").addEventListener("click", async () => {
 $("btnSaveHarbor").addEventListener("click", async () => {
   await api("/api/config", {
     method: "PUT",
-    body: JSON.stringify({ harbor: { agentVersion: $("cfgAgentVersion").value.trim(), batchConcurrency: Number($("cfgConcurrency").value), runTimeoutMin: Number($("cfgRunTimeout").value), agentTimeoutMultiplier: Number($("cfgTimeoutMult").value) || 1 }, notify: $("cfgNotify").checked }),
+    body: JSON.stringify({ harbor: { agentVersion: $("cfgAgentVersion").value.trim(), runTimeoutMin: Number($("cfgRunTimeout").value), agentTimeoutMultiplier: Number($("cfgTimeoutMult").value) || 1 }, notify: $("cfgNotify").checked }),
   });
   cfgCache = null;
   $("cfgMsg").textContent = "Runner settings saved";

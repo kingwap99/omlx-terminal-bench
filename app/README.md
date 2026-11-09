@@ -6,7 +6,7 @@ A local app that benchmarks oMLX models with the same method the ponkcoding arti
 
 1. **Pick a model**: lists models live from oMLX `/v1/models` (size, context, loaded state) and can load, unload, or preload them.
 2. **Track progress**: refreshes every 4 seconds with current batch, completed tasks, ETA, per-task results, and a live log tail.
-3. **Pause and resume**: runs are scheduled in batches (one batch = one harbor invocation with N concurrent tasks). Pause waits for the current batch to finish (or kills it immediately); unfinished tasks re-run when you resume.
+3. **Pause and resume**: runs execute serially, one task per harbor invocation. Pause waits for the running task to finish (or kills it immediately); unfinished tasks re-run when you resume.
 4. **Save and compare**: every run is stored under `data/runs/<id>/` (run.json, results.json, raw harbor output, trial copies). The Compare tab puts selected runs side by side, can include the article's 86-task rows, and shows a per-task ✅/❌/⏱ matrix between local runs.
 5. **Host hardware**: at start the app snapshots the Mac Studio specs from oMLX admin `device-info` (chip, DRAM, GPU cores) plus engine versions from `/admin/api/stats`, and stores them in the run record.
 
@@ -42,7 +42,7 @@ Get the task set with `harbor download terminal-bench` or by copying task folder
 Same: Terminal-Bench 2.0 tasks, Qwen Code agent, timeouts counted as failures, and the leak check (agent output and trajectory scanned for benchmark source hints; flagged runs are excluded from the "leak-checked" rate).
 
 Differences to keep in mind when comparing:
-- Default batch size is 4 concurrent tasks (the article used 1). Concurrency slows each task and raises timeout risk; set "Tasks per batch" to 1 for a fair comparison.
+- Runs execute serially (one task at a time), matching the article's concurrency of 1. Parallel trials would queue on a single-stream model server and each would spend its own timeout budget waiting.
 - Task time limits are the dataset's own `[agent] timeout_sec` (900 s for 49 of the 89 tasks). "Agent timeout ×" scales them (`harbor --agent-timeout-multiplier`) for slower hosts; anything other than 1 changes the comparison and is recorded per run.
 - The host is a Mac Studio (M5 Max · 128GB · 40 GPU cores per oMLX `device-info`) running oMLX; the article used RTX 5080 + Strata.
 - `qemu-*` and `mcmc-sampling-stan` are excluded by default because their environments do not run here, leaving 86 of 89 tasks.
@@ -69,7 +69,7 @@ scripts/install-launchagent.mjs  macOS LaunchAgent installer
 
 ## Runner details
 
-- Each batch runs: `harbor run -p <dataset> -i <task>... -a qwen-coder --ak version=0.26.7 -m openai/<model> --base-url <omlx>/v1 -n <batch size> -r 2 --retry-include AgentSetupTimeoutError --mounts <agent-cache> -o data/runs/<id>/harbor --job-name batch-NNN -y` (the agent toolchain is bind-mounted from `work/agent-cache/qwen` so it is not reinstalled per batch).
+- Each task runs: `harbor run -p <dataset> -i <task> -a qwen-coder --ak version=0.26.7 -m openai/<model> --base-url <omlx>/v1 -n 1 -r 2 --retry-include AgentSetupTimeoutError --mounts <agent-cache> -o data/runs/<id>/harbor --job-name batch-NNN -y` (the agent toolchain is bind-mounted from `work/agent-cache/qwen` so it is not reinstalled per task).
 - `DOCKER_HOST` (Colima) and `OPENAI_API_KEY` are passed through the environment.
 - Optional preload sends a tiny request before starting, turning a failed model load into a clear error instead of dozens of timeouts.
 - Each batch has a hard cap (default 300 min); exceeding it SIGTERMs then SIGKILLs the whole process group.
