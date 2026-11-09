@@ -135,6 +135,7 @@ $("btnStart").addEventListener("click", async () => {
         excludeTaskNames: $("txtExclude").value.split(/\n+/).map((s) => s.trim()).filter(Boolean),
         batchConcurrency: Number($("numConcurrency").value) || 4,
         batchTimeoutMin: Number($("numTimeout").value) || 300,
+        agentTimeoutMultiplier: Number($("numTimeoutMult").value) || 1,
         preload: $("chkPreload").checked,
       }),
     });
@@ -211,6 +212,7 @@ async function refreshRunDetail() {
     <div class="kv">
       <div><b>Model</b>${esc(r.model)}</div><div><b>Agent</b>${esc(r.agent)} ${esc(r.agentVersion || "")}</div>
       <div><b>Dataset</b>${esc(r.dataset)} (${p.total} tasks)</div><div><b>Batch size</b>${r.options?.batchConcurrency ?? "—"}</div>
+      <div><b>Agent timeout</b>${r.options?.agentTimeoutMultiplier && r.options.agentTimeoutMultiplier !== 1 ? `×${r.options.agentTimeoutMultiplier}` : "dataset default"}</div>
       <div><b>Leak-checked</b>${fmtPct(s.cleanPct)} (${s.cleanPassed ?? 0}/${s.clean ?? 0})</div><div><b>Raw pass</b>${s.passed ?? 0}/${s.scored ?? 0} (${fmtPct(s.rawPct)})</div>
       <div><b>Timeouts</b>${s.timeouts ?? 0}</div><div><b>Leak flags</b>${s.flagged ?? 0} (${s.flaggedPasses ?? 0} passing)</div>
       <div><b>Median time</b>${fmtMin(s.medianMin)}</div><div><b>By difficulty</b>${Object.entries(s.byDifficulty || {}).map(([k, v]) => `${k} ${v.rawPct}%`).join(", ") || "—"}</div>
@@ -318,6 +320,7 @@ async function loadSettings() {
   $("cfgAgentVersion").value = c.harbor.agentVersion;
   $("cfgConcurrency").value = c.harbor.batchConcurrency;
   $("cfgRunTimeout").value = c.harbor.runTimeoutMin;
+  $("cfgTimeoutMult").value = c.harbor.agentTimeoutMultiplier ?? 1;
   $("cfgNotify").checked = !!c.notify;
 }
 $("btnSaveCfg").addEventListener("click", async () => {
@@ -331,7 +334,7 @@ $("btnSaveCfg").addEventListener("click", async () => {
 $("btnSaveHarbor").addEventListener("click", async () => {
   await api("/api/config", {
     method: "PUT",
-    body: JSON.stringify({ harbor: { agentVersion: $("cfgAgentVersion").value.trim(), batchConcurrency: Number($("cfgConcurrency").value), runTimeoutMin: Number($("cfgRunTimeout").value) }, notify: $("cfgNotify").checked }),
+    body: JSON.stringify({ harbor: { agentVersion: $("cfgAgentVersion").value.trim(), batchConcurrency: Number($("cfgConcurrency").value), runTimeoutMin: Number($("cfgRunTimeout").value), agentTimeoutMultiplier: Number($("cfgTimeoutMult").value) || 1 }, notify: $("cfgNotify").checked }),
   });
   cfgCache = null;
   $("cfgMsg").textContent = "Runner settings saved";

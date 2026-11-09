@@ -160,6 +160,7 @@ export function recordFromTrial(task, trialDir, meta = {}) {
     flagged: flags.length > 0,
     durationSec: duration,
     timedOut,
+    agentTimeoutSec: timeoutSec,
     toolCalls: countToolCalls(trialDir),
     inputTokens: agentResult.n_input_tokens || 0,
     cacheTokens: agentResult.n_cache_tokens || 0,

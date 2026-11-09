@@ -29,6 +29,8 @@ const DEFAULTS = {
     retryInclude: ["AgentSetupTimeoutError"],
     batchConcurrency: 4,
     runTimeoutMin: 300,
+    /* scale the dataset's per-task agent timeout (e.g. 2 = 30 min for a 15 min task) */
+    agentTimeoutMultiplier: 1,
     requireDocker: true,
     envExtraArgs: ["--no-force-build"],
   },

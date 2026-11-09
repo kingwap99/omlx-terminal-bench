@@ -148,6 +148,8 @@ function copyTrial(src, dest) {
 function buildArgs(cfg, run, taskNames, jobName) {
   const h = cfg.harbor;
   const args = ["run", "-p", path.join(h.datasetDir, run.dataset), "-a", h.agent, "--ak", `version=${h.agentVersion}`, "-m", `openai/${run.model}`, "--base-url", `${cfg.omlx.baseUrl}/v1`, "-n", String(run.options.batchConcurrency), "-r", String(h.maxRetries)];
+  const mult = Number(run.options.agentTimeoutMultiplier || 1);
+  if (mult !== 1) args.push("--agent-timeout-multiplier", String(mult));
   for (const e of h.retryInclude || []) args.push("--retry-include", e);
   for (const n of taskNames) args.push("-i", n);
   for (const n of h.envExtraArgs || []) args.push(n);
@@ -161,6 +163,7 @@ function buildArgs(cfg, run, taskNames, jobName) {
 function collectBatchResults(run, records, batchDir, taskMeta) {
   if (!fs.existsSync(batchDir)) return 0;
   let added = 0;
+  const mult = Number(run.options?.agentTimeoutMultiplier || 1);
   let jobEntries = [];
   try {
     jobEntries = fs.readdirSync(batchDir, { withFileTypes: true });
@@ -181,7 +184,9 @@ function collectBatchResults(run, records, batchDir, taskMeta) {
       const trialSrc = path.join(jobPath, trial.name);
       const task = trial.name.split("__")[0];
       if (!taskMeta[task]) continue;
-      const record = recordFromTrial(task, trialSrc, taskMeta[task]);
+      const meta = taskMeta[task];
+      const scaled = meta && meta.agentTimeoutSec ? { ...meta, agentTimeoutSec: meta.agentTimeoutSec * mult } : meta;
+      const record = recordFromTrial(task, trialSrc, scaled);
       if (!record || record.reward === null) continue;
       const dest = path.join(runDir(run.id), "trials", trial.name);
       try {
@@ -378,6 +383,7 @@ export async function createRun(cfg, payload) {
     options: {
       batchConcurrency: Math.max(1, Math.min(8, Number(payload.batchConcurrency) || cfg.harbor.batchConcurrency)),
       batchTimeoutMin: Math.max(15, Number(payload.batchTimeoutMin) || cfg.harbor.runTimeoutMin),
+      agentTimeoutMultiplier: Math.max(0.25, Math.min(8, Number(payload.agentTimeoutMultiplier) || Number(cfg.harbor.agentTimeoutMultiplier) || 1)),
       preload: payload.preload !== false,
     },
     notify: cfg.notify !== false,

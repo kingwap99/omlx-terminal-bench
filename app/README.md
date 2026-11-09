@@ -43,6 +43,7 @@ Same: Terminal-Bench 2.0 tasks, Qwen Code agent, timeouts counted as failures, a
 
 Differences to keep in mind when comparing:
 - Default batch size is 4 concurrent tasks (the article used 1). Concurrency slows each task and raises timeout risk; set "Tasks per batch" to 1 for a fair comparison.
+- Task time limits are the dataset's own `[agent] timeout_sec` (900 s for 49 of the 89 tasks). "Agent timeout ×" scales them (`harbor --agent-timeout-multiplier`) for slower hosts; anything other than 1 changes the comparison and is recorded per run.
 - The host is a Mac Studio (M5 Max · 128GB · 40 GPU cores per oMLX `device-info`) running oMLX; the article used RTX 5080 + Strata.
 - `qemu-*` and `mcmc-sampling-stan` are excluded by default because their environments do not run here, leaving 86 of 89 tasks.
 
