@@ -143,6 +143,10 @@ async function handle(req, res) {
           for (const k of ["excludeTaskNames", "envExtraArgs", "retryInclude"]) if (Array.isArray(body.harbor[k])) cfg.harbor[k] = body.harbor[k];
           for (const k of ["binary", "dockerHost", "agentCacheDir", "datasetDir", "defaultDataset"]) if (body.harbor[k]) cfg.harbor[k] = body.harbor[k];
           if (body.harbor.maxRetries !== undefined) cfg.harbor.maxRetries = Number(body.harbor.maxRetries);
+          if (body.harbor.agentTimeoutMultiplier !== undefined) {
+            cfg.harbor.agentTimeoutMultiplier = Math.max(0.25, Math.min(8, Number(body.harbor.agentTimeoutMultiplier) || 1));
+          }
+          if (body.harbor.requireDocker !== undefined) cfg.harbor.requireDocker = !!body.harbor.requireDocker;
         }
         if (body.notify !== undefined) cfg.notify = !!body.notify;
         saveConfig(cfg);

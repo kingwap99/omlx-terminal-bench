@@ -324,6 +324,8 @@ async function loadSettings() {
   $("cfgAgentVersion").value = c.harbor.agentVersion;
   $("cfgRunTimeout").value = c.harbor.runTimeoutMin;
   $("cfgTimeoutMult").value = c.harbor.agentTimeoutMultiplier ?? 1;
+  /* New-run form starts from the configured default. */
+  if (document.activeElement !== $("numTimeoutMult")) $("numTimeoutMult").value = c.harbor.agentTimeoutMultiplier ?? 1;
   $("cfgNotify").checked = !!c.notify;
 }
 $("btnSaveCfg").addEventListener("click", async () => {
@@ -340,7 +342,9 @@ $("btnSaveHarbor").addEventListener("click", async () => {
     body: JSON.stringify({ harbor: { agentVersion: $("cfgAgentVersion").value.trim(), runTimeoutMin: Number($("cfgRunTimeout").value), agentTimeoutMultiplier: Number($("cfgTimeoutMult").value) || 1 }, notify: $("cfgNotify").checked }),
   });
   cfgCache = null;
-  $("cfgMsg").textContent = "Runner settings saved";
+  const mult = Number($("cfgTimeoutMult").value) || 1;
+  $("numTimeoutMult").value = mult;
+  $("cfgMsg").textContent = "Runner settings saved — new runs use agent timeout ×" + mult;
 });
 
 /* ---------------- boot ---------------- */
