@@ -34,6 +34,14 @@ function send(res, status, body, type = "application/json; charset=utf-8") {
   res.end(buf);
 }
 
+/* Wall-clock duration of a run: now while running, frozen at the last update
+   once it stopped. */
+function elapsedOf(r) {
+  if (!r.startedAt) return null;
+  const end = r.status === "running" ? Date.now() : Date.parse(r.finishedAt || r.updatedAt || new Date().toISOString());
+  return Math.max(0, Math.round((end - Date.parse(r.startedAt)) / 1000));
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = "";
@@ -104,6 +112,7 @@ function buildComparison(cfg, ids) {
       byCategory: view.summary?.byCategory || {},
       tasks: Object.fromEntries((view.records || []).map((r) => [r.task, { passed: r.passed, scored: r.scored, durationSec: r.durationSec, flagged: r.flagged, timedOut: r.timedOut }])),
       createdAt: view.createdAt,
+      elapsedSec: elapsedOf(view),
     });
   }
   return rows;
@@ -206,7 +215,7 @@ async function handle(req, res) {
 
       /* ---------- runs ---------- */
       if (p === "/api/runs" && method === "GET") {
-        return send(res, 200, runner.listRuns().map((r) => ({ ...r, active: runner.isBusy(r.id) })));
+        return send(res, 200, runner.listRuns().map((r) => ({ ...r, active: runner.isBusy(r.id), elapsedSec: elapsedOf(r) })));
       }
       if (p === "/api/runs" && method === "POST") {
         const body = await readBody(req);

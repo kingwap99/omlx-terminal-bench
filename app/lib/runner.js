@@ -7,6 +7,8 @@ import { listTasks, filterTasks, recordFromTrial, summarize } from "./tasks.js";
 import { machineSnapshot, preloadCheck } from "./omlx.js";
 
 const runtime = new Map(); // runId -> { child, pauseRequested, cancelRequested, batchDir }
+/* oMLX serves one stream, so two runs at once starve each other. */
+let activeRunId = null;
 
 function runDir(id) {
   return path.join(RUNS_DIR, id);
@@ -394,6 +396,7 @@ async function loop(cfg, run) {
     saveRun(run, records);
   } finally {
     runtime.delete(run.id);
+    if (activeRunId === run.id) activeRunId = null;
   }
 }
 
@@ -412,6 +415,10 @@ function notify(run) {
 
 export function isBusy(id) {
   return runtime.has(id);
+}
+
+export function activeId() {
+  return activeRunId;
 }
 
 export async function createRun(cfg, payload) {
@@ -465,6 +472,7 @@ export async function startRun(cfg, id) {
   const run = readRun(id);
   if (!run) throw new Error("Run not found");
   if (runtime.has(id)) return { started: false, reason: "already-running", run };
+  if (activeRunId && activeRunId !== id) return { started: false, reason: "another-run-active:" + activeRunId, run };
   if (cfg.harbor.requireDocker !== false) {
     const docker = await dockerCheck(cfg);
     if (!docker.ok) {
@@ -476,6 +484,7 @@ export async function startRun(cfg, id) {
   }
   const rt = { child: null, pauseRequested: false, cancelRequested: false };
   runtime.set(id, rt);
+  activeRunId = id;
   run.status = "running";
   run.note = null;
   saveRun(run);
@@ -492,6 +501,7 @@ export async function startRun(cfg, id) {
         run.note = `Model load failed: ${e.message}`;
         saveRun(run);
         runtime.delete(id);
+        if (activeRunId === id) activeRunId = null;
         return;
       }
     }
@@ -548,7 +558,11 @@ export function runView(cfg, run) {
   const perTask = new Map();
   for (const r of records) if (r.scored) perTask.set(r.task, (perTask.get(r.task) || 0) + 1);
   const done = new Set([...perTask].filter(([, c]) => c >= want).map(([t]) => t));
-  const elapsed = run.startedAt ? (Date.now() - Date.parse(run.startedAt)) / 1000 : 0;
+  /* Wall-clock duration: stop the clock at finishedAt, otherwise every read of
+     a finished run would report a longer total. */
+  const startMs = run.startedAt ? Date.parse(run.startedAt) : null;
+  const endMs = run.finishedAt ? Date.parse(run.finishedAt) : Date.now();
+  const elapsed = startMs ? Math.max(0, (endMs - startMs) / 1000) : 0;
   const durations = records.map((r) => r.durationSec).filter((x) => x != null);
   const remainingTasks = run.tasks.filter((t) => !done.has(t.name));
   const eta = durations.length ? (durations.reduce((a, b) => a + b, 0) / durations.length) * remainingTasks.length / Math.max(1, run.options.batchConcurrency) : null;

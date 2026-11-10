@@ -139,7 +139,7 @@ $("btnStart").addEventListener("click", async () => {
         preload: $("chkPreload").checked,
       }),
     });
-    $("startMsg").textContent = "Started";
+    $("startMsg").textContent = run.status === "queued" ? "Another run is active — this one is queued." : "Started";
     document.querySelector('nav button[data-tab="runs"]').click();
     openRun(run.id);
   } catch (e) {
@@ -154,7 +154,7 @@ async function refreshRuns() {
   state.runs = await api("/api/runs");
   const box = $("runsTable");
   if (!state.runs.length) { box.innerHTML = '<p class="muted">No runs yet</p>'; return; }
-  box.innerHTML = `<table><thead><tr><th>Name</th><th>Status</th><th class="num">Progress</th><th class="num">Passed</th><th class="num">Clean</th><th class="num">Median</th><th class="num">Timeouts</th><th>Machine</th><th>Created</th></tr></thead><tbody>${state.runs
+  box.innerHTML = `<table><thead><tr><th>Name</th><th>Status</th><th class="num">Progress</th><th class="num">Passed</th><th class="num">Clean</th><th class="num">Median</th><th class="num">Elapsed</th><th class="num">Timeouts</th><th>Machine</th><th>Created</th></tr></thead><tbody>${state.runs
     .map((r) => {
       const s = r.summary || {};
       return `<tr data-run="${esc(r.id)}" style="cursor:pointer">
@@ -164,6 +164,7 @@ async function refreshRuns() {
         <td class="num">${s.passed ?? 0} (${fmtPct(s.rawPct)})</td>
         <td class="num">${fmtPct(s.cleanPct)}${s.flagged ? ` ⚠${s.flagged}` : ""}</td>
         <td class="num">${fmtMin(s.medianMin)}</td>
+        <td class="num">${r.elapsedSec != null ? fmtMin(r.elapsedSec / 60) : "—"}</td>
         <td class="num">${s.timeouts ?? 0}</td>
         <td>${esc(r.machine?.chip || "—")}${r.machine?.memoryGb ? ` · ${r.machine.memoryGb}GB` : ""}</td>
         <td class="muted">${esc((r.createdAt || "").slice(0, 16).replace("T", " "))}</td>
@@ -232,6 +233,7 @@ async function refreshRunDetail() {
       <td>${flagged ? `⚠ ${esc((flagged.flags || []).join(", "))}` : "—"}</td></tr>`;
   }).join("");
   const nAtt = Number(r.options?.nAttempts || 1);
+  const agentSumMin = recs.reduce((a, x) => a + (x.durationSec || 0), 0) / 60;
   const pending = r.tasks.filter((t) => recs.filter((x) => x.task === t.name && x.scored).length < nAtt).map((t) => t.name);
   const cur = r.currentBatch ? `Current batch: ${r.currentBatch.tasks.join(", ")}` : "";
   $("runDetail").innerHTML = `<div class="card">
@@ -247,6 +249,7 @@ async function refreshRunDetail() {
       <div><b>Leak-checked</b>${fmtPct(s.cleanPct)} (${s.cleanPassed ?? 0}/${s.clean ?? 0})</div><div><b>Raw pass</b>${s.passed ?? 0}/${s.scored ?? 0} (${fmtPct(s.rawPct)})</div>
       <div><b>Timeouts</b>${s.timeouts ?? 0}</div><div><b>Leak flags</b>${s.flagged ?? 0} (${s.flaggedPasses ?? 0} passing)</div>
       <div><b>Median time</b>${fmtMin(s.medianMin)}</div><div><b>By difficulty</b>${Object.entries(s.byDifficulty || {}).map(([k, v]) => `${k} ${v.rawPct}%`).join(", ") || "—"}</div>
+      <div><b>Total time</b>${p.elapsedSec ? fmtMin(p.elapsedSec / 60) : "—"}</div><div><b>Agent time (sum)</b>${agentSumMin ? fmtMin(agentSumMin) : "—"}</div>
     </div>
     <h3>Host hardware (captured at start)</h3>
     <div class="kv">
@@ -279,7 +282,10 @@ async function refreshRunDetail() {
         if (act === "pause") await api(`/api/runs/${r.id}/pause`, { method: "POST", body: "{}" });
         else if (act === "force") await api(`/api/runs/${r.id}/pause`, { method: "POST", body: JSON.stringify({ force: true }) });
         else if (act === "cancel") await api(`/api/runs/${r.id}/cancel`, { method: "POST", body: "{}" });
-        else if (act === "start") await api(`/api/runs/${r.id}/start`, { method: "POST", body: "{}" });
+        else if (act === "start") {
+          const res = await api(`/api/runs/${r.id}/start`, { method: "POST", body: "{}" });
+          if (res.started === false) alert(res.reason && res.reason.startsWith("another-run-active") ? "Another run is already active. Pause or stop it first." : "Could not start: " + (res.reason || "unknown"));
+        }
         else if (act === "delete") {
           if (!confirm(`Delete "${r.name}"? All records and trial files will be removed.`)) { btn.disabled = false; return; }
           await api(`/api/runs/${r.id}`, { method: "DELETE" });
@@ -315,7 +321,7 @@ $("btnCompare").addEventListener("click", async () => {
   const { rows } = await api(`/api/compare?ids=${encodeURIComponent(ids.join(","))}`);
   if (!rows.length) { $("compareTable").innerHTML = '<p class="muted">No data</p>'; return; }
   const maxScored = Math.max(...rows.map((r) => r.scored || 0));
-  $("compareTable").innerHTML = `<table><thead><tr><th>Run</th><th>Model</th><th>Dataset</th><th class="num">Tasks</th><th class="num">Passed</th><th class="num">Raw</th><th class="num">Leak-checked</th><th class="num">Timeouts</th><th class="num">Median</th><th>Easy / Med / Hard</th><th>Machine</th></tr></thead><tbody>${rows
+  $("compareTable").innerHTML = `<table><thead><tr><th>Run</th><th>Model</th><th>Dataset</th><th class="num">Tasks</th><th class="num">Passed</th><th class="num">Raw</th><th class="num">Leak-checked</th><th class="num">Timeouts</th><th class="num">Median</th><th class="num">Total</th><th>Easy / Med / Hard</th><th>Machine</th></tr></thead><tbody>${rows
     .map((r) => {
       const d = r.byDifficulty || {};
       const diffStr = ["easy", "medium", "hard"].map((k) => `${fmtPct(d[k]?.rawPct)}`).join(" / ");
@@ -323,6 +329,7 @@ $("btnCompare").addEventListener("click", async () => {
         <td class="num">${r.scored}${r.scored < maxScored ? " ⚠" : ""}</td><td class="num">${r.passed}</td>
         <td class="num">${fmtPct(r.rawPct)}</td><td class="num"><b>${fmtPct(r.cleanPct)}</b></td>
         <td class="num">${r.timeouts ?? "—"}</td><td class="num">${fmtMin(r.medianMin)}</td>
+        <td class="num">${r.elapsedSec != null ? fmtMin(r.elapsedSec / 60) : "—"}</td>
         <td>${diffStr}</td><td>${esc(r.machine || "—")}${r.memoryGb ? ` · ${r.memoryGb}GB` : ""}</td></tr>`;
     })
     .join("")}</tbody></table>
