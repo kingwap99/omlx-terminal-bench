@@ -11,6 +11,8 @@ export const REFERENCE_PATH = path.join(DATA_DIR, "reference.json");
 
 const DEFAULTS = {
   port: Number(process.env.PORT) || 4665,
+  /* preselected in the New run form */
+  preferredModel: process.env.OMLX_PREFERRED_MODEL || "",
   omlx: {
     baseUrl: process.env.OMLX_BASE_URL || "http://127.0.0.1:8258",
     apiKey: process.env.OMLX_API_KEY || "",

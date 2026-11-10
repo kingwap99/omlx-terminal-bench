@@ -138,6 +138,7 @@ async function handle(req, res) {
         return send(res, 200, {
           version: APP_VERSION,
           port: cfg.port,
+          preferredModel: cfg.preferredModel || null,
           omlx: { baseUrl: cfg.omlx.baseUrl, apiKeyMasked: maskKey(cfg.omlx.apiKey), hasKey: !!cfg.omlx.apiKey },
           harbor: cfg.harbor,
           notify: cfg.notify,
@@ -159,6 +160,7 @@ async function handle(req, res) {
           if (body.harbor.nAttempts !== undefined) cfg.harbor.nAttempts = Math.max(1, Math.min(5, Math.round(Number(body.harbor.nAttempts) || 1)));
         }
         if (body.notify !== undefined) cfg.notify = !!body.notify;
+        if (body.preferredModel !== undefined) cfg.preferredModel = String(body.preferredModel || "");
         saveConfig(cfg);
         return send(res, 200, { ok: true });
       }

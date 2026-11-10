@@ -16,6 +16,14 @@ const statusBadge = (s) => { const [t, c] = STATUS[s] || [s, "gray"]; return `<s
 
 let state = { models: [], runs: [], tasks: {}, selectedModel: null, selectedRun: null, compareIds: new Set() };
 let pollTimer = null;
+let preferredModel = "";
+
+function populatePreferred() {
+  const sel = $("cfgPreferred");
+  if (!sel) return;
+  sel.innerHTML = '<option value="">(none)</option>' + state.models.map((m) => `<option value="${esc(m.id)}">${esc(m.id)}</option>`).join("");
+  sel.value = preferredModel || "";
+}
 
 /* ---------------- tabs ---------------- */
 document.querySelectorAll("nav button.tab").forEach((b) =>
@@ -45,6 +53,7 @@ async function refreshServer() {
     }
     state.models = st.models || [];
     renderModels();
+    populatePreferred();
   } catch (e) {
     $("serverBadge").textContent = `oMLX connection failed: ${e.message}`;
     $("serverBadge").className = "badge red";
@@ -54,6 +63,7 @@ async function refreshServer() {
 function renderModels() {
   const box = $("modelList");
   if (!state.models.length) { box.innerHTML = '<p class="muted">No models found or listing failed</p>'; return; }
+  if (!state.selectedModel && preferredModel && state.models.some((m) => m.id === preferredModel)) state.selectedModel = preferredModel;
   box.innerHTML = state.models.map((m) => {
     const sizeGb = m.estimatedSize ? (m.estimatedSize / 1024 ** 3).toFixed(1) + " GB" : "";
     const badge = m.loaded ? '<span class="badge green">loaded</span>' : m.isLoading ? '<span class="badge yellow">loading…</span>' : '<span class="badge gray">not loaded</span>';
@@ -354,6 +364,8 @@ $("btnCompare").addEventListener("click", async () => {
 async function loadSettings() {
   const c = await api("/api/config");
   cfgCache = c;
+  preferredModel = c.preferredModel || "";
+  populatePreferred();
   if (c.version) {
     $("appVersion").textContent = `v${c.version}`;
     document.title = `oMLX Terminal-Bench Runner v${c.version}`;
@@ -379,10 +391,13 @@ $("btnSaveCfg").addEventListener("click", async () => {
 $("btnSaveHarbor").addEventListener("click", async () => {
   await api("/api/config", {
     method: "PUT",
-    body: JSON.stringify({ harbor: { agentVersion: $("cfgAgentVersion").value.trim(), runTimeoutMin: Number($("cfgRunTimeout").value), agentTimeoutMultiplier: Number($("cfgTimeoutMult").value) || 1, nAttempts: Number($("cfgAttempts").value) || 1 }, notify: $("cfgNotify").checked }),
+    body: JSON.stringify({ harbor: { agentVersion: $("cfgAgentVersion").value.trim(), runTimeoutMin: Number($("cfgRunTimeout").value), agentTimeoutMultiplier: Number($("cfgTimeoutMult").value) || 1, nAttempts: Number($("cfgAttempts").value) || 1 }, notify: $("cfgNotify").checked, preferredModel: $("cfgPreferred").value }),
   });
   cfgCache = null;
   const mult = Number($("cfgTimeoutMult").value) || 1;
+  preferredModel = $("cfgPreferred").value;
+  state.selectedModel = null;
+  renderModels();
   $("numTimeoutMult").value = mult;
   $("cfgMsg").textContent = "Runner settings saved — new runs use agent timeout ×" + mult;
 });
