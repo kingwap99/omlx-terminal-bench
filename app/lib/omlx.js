@@ -40,8 +40,9 @@ export async function listModels(cfg) {
   const models = (data?.data || []).filter((m) => m.object === "model" || m.id);
   return models.map((m) => ({
     id: m.id,
-    maxModelLen: m.max_model_len ?? null,
+    maxModelLen: m.max_model_len ?? m.capabilities?.context_length ?? null,
     ownedBy: m.owned_by ?? null,
+    apiTypes: m.api_types ?? null,
   }));
 }
 

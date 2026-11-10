@@ -80,7 +80,7 @@ function renderModels() {
   box.innerHTML = state.models.map((m) => {
     const sizeGb = m.estimatedSize ? (m.estimatedSize / 1024 ** 3).toFixed(1) + " GB" : "";
     const canManage = state.providerId === "omlx";
-    const badge = m.loaded ? '<span class="badge green">loaded</span>' : m.isLoading ? '<span class="badge yellow">loading…</span>' : '<span class="badge gray">not loaded</span>';
+    const badge = canManage ? m.loaded ? '<span class="badge green">loaded</span>' : m.isLoading ? '<span class="badge yellow">loading…</span>' : '<span class="badge gray">not loaded</span>' : '<span class="badge gray">available</span>';
     return `<div class="model-item ${state.selectedModel === m.id ? "selected" : ""}" data-model="${esc(m.id)}">
       <span class="grow"><b>${esc(m.id)}</b><div class="mid">context ${m.maxModelLen ?? "—"} · ${sizeGb}${m.maxContextWindow ? " · limit " + m.maxContextWindow : ""}</div></span>
       ${badge}
