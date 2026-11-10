@@ -148,6 +148,23 @@ export function recordFromTrial(task, trialDir, meta = {}) {
   const duration = started && finished ? (finished - started) / 1000 : null;
 
   const flags = leakFlags(trialDir);
+  /* Zero reward without any verifier test output means the verification step
+     itself failed (setup crash), not that the answer was wrong. */
+  const verifierDir = path.join(trialDir, "verifier");
+  const hasCtrf = fs.existsSync(path.join(verifierDir, "ctrf.json"));
+  let hasStdout = false;
+  try {
+    hasStdout = fs.readdirSync(verifierDir).includes("test-stdout.txt");
+  } catch {
+    hasStdout = false;
+  }
+  const vOut = readText(path.join(verifierDir, "test-stdout.txt"));
+  const hasTests =
+    hasCtrf ||
+    /(^|\n)\s*(PASSED|FAILED)\s/.test(vOut) ||
+    /\b\d+ (passed|failed)\b/i.test(vOut) ||
+    /={5,}.*(passed|failed).*={5,}/i.test(vOut);
+  const verifierAnomaly = !passed && !timedOut && reward !== null && hasStdout && !hasTests;
   const timeoutSec = meta.agentTimeoutSec ?? null;
   const timedOut = exception.exception_type === "AgentTimeoutError" || (duration != null && timeoutSec != null && duration >= timeoutSec - 5);
 
@@ -160,6 +177,7 @@ export function recordFromTrial(task, trialDir, meta = {}) {
     flagged: flags.length > 0,
     durationSec: duration,
     timedOut,
+    verifierAnomaly,
     agentTimeoutSec: timeoutSec,
     toolCalls: countToolCalls(trialDir),
     inputTokens: agentResult.n_input_tokens || 0,
@@ -236,6 +254,7 @@ export function summarize(records) {
     flagged: scored.filter((r) => r.flagged).length,
     flaggedPasses: scored.filter((r) => r.flagged && r.passed).length,
     timeouts: scored.filter((r) => r.timedOut).length,
+    verifierAnomalies: scored.filter((r) => r.verifierAnomaly).length,
     medianMin: median(durations.map((d) => (d == null ? null : d / 60))),
     medianToolCalls: median(scored.map((r) => r.toolCalls)),
     medianInputTokens: median(scored.map((r) => r.inputTokens)),

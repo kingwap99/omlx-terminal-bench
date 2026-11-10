@@ -238,6 +238,8 @@ async function refreshRunDetail() {
       resultCell = `<span class="${cls}">${passedN}/${list.length} pass</span>` + (timeouts ? ` <span class="muted">⏱${timeouts}</span>` : "");
     } else if (!first.scored) {
       resultCell = `<span class="muted">${esc(first.exceptionType || "unscored")}</span>`;
+    } else if (first.verifierAnomaly) {
+      resultCell = '<span class="fail" title="verifier produced no test output">⚠ verifier</span>';
     } else {
       resultCell = first.passed ? '<span class="pass">✅ pass</span>' : first.timedOut ? '<span class="fail">⏱ timeout</span>' : '<span class="fail">❌ fail</span>';
     }
@@ -273,6 +275,7 @@ async function refreshRunDetail() {
       <div><b>Attempts per task</b>${nAtt}${nAtt > 1 ? ` · all-attempt pass ${s.taskPassedAll ?? 0}/${s.taskScored ?? 0} · any ${s.taskPassedAny ?? 0}/${s.taskScored ?? 0}` : ""}</div>
       <div><b>Leak-checked</b>${fmtPct(s.cleanPct)} (${s.cleanPassed ?? 0}/${s.clean ?? 0})</div><div><b>Raw pass</b>${s.passed ?? 0}/${s.scored ?? 0} (${fmtPct(s.rawPct)})</div>
       <div><b>Timeouts</b>${s.timeouts ?? 0}</div><div><b>Leak flags</b>${s.flagged ?? 0} (${s.flaggedPasses ?? 0} passing)</div>
+      <div><b>Verifier anomalies</b>${s.verifierAnomalies ?? 0}</div>
       <div><b>Median time</b>${fmtMin(s.medianMin)}</div><div><b>By difficulty</b>${Object.entries(s.byDifficulty || {}).map(([k, v]) => `${k} ${v.rawPct}%`).join(", ") || "—"}</div>
       <div><b>Total time</b>${p.elapsedSec ? fmtMin(p.elapsedSec / 60) : "—"}</div><div><b>Agent time (sum)</b>${agentSumMin ? fmtMin(agentSumMin) : "—"}</div>
     </div>
