@@ -6,6 +6,7 @@ import { loadConfig, saveConfig, maskKey, APP_DIR } from "./lib/config.js";
 import * as omlx from "./lib/omlx.js";
 import { listTasks, summarize } from "./lib/tasks.js";
 import * as runner from "./lib/runner.js";
+import { loadVersion } from "./lib/version.js";
 
 const PUBLIC_DIR = path.join(APP_DIR, "public");
 const MIME = {
@@ -19,13 +20,8 @@ const MIME = {
 };
 
 let cfg = loadConfig();
-const APP_VERSION = (() => {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(APP_DIR, "package.json"), "utf8")).version || "0.0.0";
-  } catch {
-    return "0.0.0";
-  }
-})();
+const VERSION = loadVersion();
+const APP_VERSION = VERSION.version;
 runner.markOrphansInterrupted();
 
 function send(res, status, body, type = "application/json; charset=utf-8") {
@@ -137,6 +133,7 @@ async function handle(req, res) {
       if (p === "/api/config" && method === "GET") {
         return send(res, 200, {
           version: APP_VERSION,
+          buildTime: VERSION.bumpedAt,
           port: cfg.port,
           preferredModel: cfg.preferredModel || null,
           omlx: { baseUrl: cfg.omlx.baseUrl, apiKeyMasked: maskKey(cfg.omlx.apiKey), hasKey: !!cfg.omlx.apiKey },
@@ -163,6 +160,51 @@ async function handle(req, res) {
         if (body.preferredModel !== undefined) cfg.preferredModel = String(body.preferredModel || "");
         saveConfig(cfg);
         return send(res, 200, { ok: true });
+      }
+
+      /* ---------- providers ---------- */
+      if (p === "/api/providers" && method === "GET") {
+        return send(res, 200, (cfg.providers || []).map((prov) => ({ id: prov.id, label: prov.label, baseUrl: prov.baseUrl, apiKeyMasked: maskKey(prov.apiKey), hasKey: !!prov.apiKey })));
+      }
+      if (p === "/api/providers" && method === "PUT") {
+        const body = await readBody(req);
+        if (!Array.isArray(body.providers)) return send(res, 400, { error: "providers[] is required" });
+        const existing = Object.fromEntries((cfg.providers || []).map((x) => [x.id, x]));
+        cfg.providers = body.providers
+          .map((prov) => ({
+            id: String(prov.id || "").trim() || "prov-" + Math.random().toString(36).slice(2, 8),
+            label: String(prov.label || prov.id || "provider"),
+            baseUrl: String(prov.baseUrl || "").replace(/\/+$/, ""),
+            apiKey: prov.apiKey ? String(prov.apiKey) : (existing[prov.id]?.apiKey || ""),
+          }))
+          .filter((x) => x.baseUrl);
+        const om = cfg.providers.find((x) => x.id === "omlx");
+        if (om) {
+          cfg.omlx.baseUrl = om.baseUrl;
+          if (om.apiKey) cfg.omlx.apiKey = om.apiKey;
+        }
+        saveConfig(cfg);
+        return send(res, 200, { ok: true, providers: cfg.providers.map((x) => ({ id: x.id, label: x.label, baseUrl: x.baseUrl, hasKey: !!x.apiKey })) });
+      }
+      const provMatch = /^\/api\/providers\/([^/]+)\/(models|status)$/.exec(p);
+      if (provMatch) {
+        const prov = (cfg.providers || []).find((x) => x.id === decodeURIComponent(provMatch[1]));
+        if (!prov) return send(res, 404, { error: "provider not found" });
+        if (provMatch[2] === "models") {
+          const [models, status] = await Promise.allSettled([omlx.listModels(prov), omlx.modelsStatus(prov)]);
+          return send(res, 200, {
+            provider: { id: prov.id, label: prov.label, baseUrl: prov.baseUrl },
+            models: models.status === "fulfilled" ? models.value.map((m) => ({ ...m, ...(status.status === "fulfilled" ? status.value?.byModel?.[m.id] || {} : {}) })) : [],
+            error: models.status === "rejected" ? String(models.reason?.message || models.reason) : null,
+          });
+        }
+        const [health, device] = await Promise.allSettled([omlx.health(prov), omlx.deviceInfo(prov)]);
+        return send(res, 200, {
+          provider: { id: prov.id, label: prov.label, baseUrl: prov.baseUrl },
+          online: health.status === "fulfilled",
+          health: health.status === "fulfilled" ? health.value : { error: String(health.reason?.message || health.reason) },
+          device: device.status === "fulfilled" ? device.value : { error: String(device.reason?.message || device.reason) },
+        });
       }
 
       /* ---------- oMLX ---------- */
@@ -305,3 +347,5 @@ const PORT = Number(process.env.PORT || cfg.port || 4665);
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`[bench] http://localhost:${PORT}  (oMLX ${cfg.omlx.baseUrl})`);
 });
+
+/* version bump probe */

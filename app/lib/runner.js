@@ -10,6 +10,20 @@ const runtime = new Map(); // runId -> { child, pauseRequested, cancelRequested,
 /* oMLX serves one stream, so two runs at once starve each other. */
 let activeRunId = null;
 
+/* A run belongs to one provider (oMLX, OpenCodex, or any OpenAI-compatible
+   endpoint). The key lives in config, never in the run record. */
+function providerFor(cfg, run) {
+  const list = cfg.providers || [];
+  return (
+    list.find((p) => p.id === run.providerId) || {
+      id: "omlx",
+      label: "oMLX",
+      baseUrl: cfg.omlx.baseUrl,
+      apiKey: cfg.omlx.apiKey,
+    }
+  );
+}
+
 function runDir(id) {
   return path.join(RUNS_DIR, id);
 }
@@ -149,7 +163,7 @@ function copyTrial(src, dest) {
 
 function buildArgs(cfg, run, taskNames, jobName) {
   const h = cfg.harbor;
-  const args = ["run", "-p", path.join(h.datasetDir, run.dataset), "-a", h.agent, "--ak", `version=${h.agentVersion}`, "-m", `openai/${run.model}`, "--base-url", `${cfg.omlx.baseUrl}/v1`, "-n", String(run.options.batchConcurrency), "-r", String(h.maxRetries)];
+  const args = ["run", "-p", path.join(h.datasetDir, run.dataset), "-a", h.agent, "--ak", `version=${h.agentVersion}`, "-m", `openai/${run.model}`, "--base-url", `${providerFor(cfg, run).baseUrl}/v1`, "-n", String(run.options.batchConcurrency), "-r", String(h.maxRetries)];
   const attempts = Number(run.options.nAttempts || 1);
   if (attempts > 1) args.push("-k", String(attempts));
   const mult = Number(run.options.agentTimeoutMultiplier || 1);
@@ -253,7 +267,7 @@ function runBatch(cfg, run, taskNames, index, logFile) {
     const env = {
       ...process.env,
       PATH: h.binary.includes("/") ? `${path.dirname(h.binary)}:${process.env.PATH}` : process.env.PATH,
-      OPENAI_API_KEY: cfg.omlx.apiKey || "",
+      OPENAI_API_KEY: providerFor(cfg, run).apiKey || "",
     };
     if (h.dockerHost) env.DOCKER_HOST = h.dockerHost;
     fs.appendFileSync(logFile, `\n$ ${h.binary} ${args.join(" ")}\n`);
@@ -430,17 +444,28 @@ export async function createRun(cfg, payload) {
     exclude: [...(cfg.harbor.excludeTaskNames || []), ...(payload.excludeTaskNames || [])],
   });
   if (!tasks.length) throw new Error("No tasks left after filtering");
+  const provider = (cfg.providers || []).find((p) => p.id === payload.providerId) || {
+    id: "omlx",
+    label: "oMLX",
+    baseUrl: cfg.omlx.baseUrl,
+    apiKey: cfg.omlx.apiKey,
+  };
   const id = payload.id || stampId();
   const dir = runDir(id);
   fs.mkdirSync(dir, { recursive: true });
-  const machine = await machineSnapshot(cfg).catch((e) => ({ capturedAt: new Date().toISOString(), error: String(e.message || e) }));
+  const machine =
+    provider.id === "omlx"
+      ? await machineSnapshot(cfg).catch((e) => ({ capturedAt: new Date().toISOString(), error: String(e.message || e) }))
+      : { capturedAt: new Date().toISOString(), provider: provider.label, baseUrl: provider.baseUrl, note: "provider has no admin spec API" };
   machine.local = { hostname: os.hostname(), platform: `${os.type()} ${os.release()}`, arch: os.arch(), cpus: os.cpus().length, totalMemoryGb: +(os.totalmem() / 1024 ** 3).toFixed(1), node: process.version, role: "benchmark controller" };
   const run = {
     id,
     name: payload.name || `${payload.model} · ${new Date().toLocaleString("zh-TW")}`,
     model: payload.model,
+    providerId: provider.id,
+    providerLabel: provider.label,
     dataset: payload.dataset || cfg.harbor.defaultDataset,
-    baseUrl: cfg.omlx.baseUrl,
+    baseUrl: provider.baseUrl,
     agent: cfg.harbor.agent,
     agentVersion: cfg.harbor.agentVersion,
     options: {
@@ -491,7 +516,7 @@ export async function startRun(cfg, id) {
   (async () => {
     if (run.options.preload) {
       try {
-        const p = await preloadCheck(cfg, run.model);
+        const p = await preloadCheck(providerFor(cfg, run), run.model);
         fs.appendFileSync(path.join(runDir(id), "runner.log"), `\n[runner] preload ok ${p.model} in ${p.seconds.toFixed(1)}s\n`);
         run.preloadSeconds = p.seconds;
         saveRun(run);

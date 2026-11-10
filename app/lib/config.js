@@ -13,6 +13,8 @@ const DEFAULTS = {
   port: Number(process.env.PORT) || 4665,
   /* preselected in the New run form */
   preferredModel: process.env.OMLX_PREFERRED_MODEL || "",
+  /* model sources: oMLX plus any OpenAI-compatible endpoint */
+  providers: [],
   omlx: {
     baseUrl: process.env.OMLX_BASE_URL || "http://127.0.0.1:8258",
     apiKey: process.env.OMLX_API_KEY || "",
@@ -59,7 +61,15 @@ export function loadConfig() {
   } catch {
     /* first run */
   }
-  return deepMerge(DEFAULTS, saved);
+  const cfg = deepMerge(DEFAULTS, saved);
+  cfg.providers = Array.isArray(cfg.providers) ? cfg.providers.filter((p) => p && p.id && p.baseUrl) : [];
+  const om = cfg.providers.find((p) => p.id === "omlx");
+  if (!om) cfg.providers.unshift({ id: "omlx", label: "oMLX", baseUrl: cfg.omlx.baseUrl, apiKey: cfg.omlx.apiKey });
+  else {
+    om.baseUrl = cfg.omlx.baseUrl;
+    if (!om.apiKey) om.apiKey = cfg.omlx.apiKey;
+  }
+  return cfg;
 }
 
 export function saveConfig(cfg) {

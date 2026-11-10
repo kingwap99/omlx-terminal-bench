@@ -14,7 +14,7 @@ const STATUS = {
 };
 const statusBadge = (s) => { const [t, c] = STATUS[s] || [s, "gray"]; return `<span class="badge ${c}">${t}</span>`; };
 
-let state = { models: [], runs: [], tasks: {}, selectedModel: null, selectedRun: null, compareIds: new Set() };
+let state = { models: [], providers: [], providerId: "omlx", runs: [], tasks: {}, selectedModel: null, selectedRun: null, compareIds: new Set() };
 let pollTimer = null;
 let preferredModel = "";
 
@@ -40,22 +40,35 @@ document.querySelectorAll("nav button.tab").forEach((b) =>
 /* ---------------- launch tab ---------------- */
 async function refreshServer() {
   try {
-    const st = await api("/api/omlx/status");
-    $("serverBadge").textContent = st.online ? `oMLX online (${st.models.length} models)` : "oMLX offline";
-    $("serverBadge").className = `badge ${st.online ? "green" : "red"}`;
-    const d = st.device || {};
+    const provs = await api("/api/providers");
+    state.providers = provs;
+    const sel = $("selProvider");
+    if (sel) {
+      const keep = state.providerId;
+      sel.innerHTML = provs.map((p) => `<option value="${esc(p.id)}">${esc(p.label)} — ${esc(p.baseUrl)}</option>`).join("");
+      state.providerId = provs.some((p) => p.id === keep) ? keep : provs[0]?.id || "omlx";
+      sel.value = state.providerId;
+    }
+    const pid = encodeURIComponent(state.providerId);
+    const label = provs.find((p) => p.id === state.providerId)?.label || state.providerId;
+    const st = await api(`/api/providers/${pid}/models`);
+    $("serverBadge").textContent = st.error ? `${label}: ${st.error}` : `${label} online (${st.models.length} models)`;
+    $("serverBadge").className = `badge ${st.error ? "red" : "green"}`;
+    const meta = await api(`/api/providers/${pid}/status`).catch(() => null);
+    const d = meta?.device || {};
     if (d.chip_name) {
       $("machineBadge").textContent = `Test host: ${d.chip_name}${d.chip_variant ? " " + d.chip_variant : ""} · DRAM ${d.memory_gb}GB · GPU ${d.gpu_cores} cores`;
       $("machineBadge").className = "badge blue";
     } else {
-      $("machineBadge").textContent = "Test host: unknown";
+      $("machineBadge").textContent = `Provider: ${label}${st.error ? " (offline)" : ""}`;
       $("machineBadge").className = "badge gray";
     }
     state.models = st.models || [];
     renderModels();
     populatePreferred();
+    renderProvidersEditor();
   } catch (e) {
-    $("serverBadge").textContent = `oMLX connection failed: ${e.message}`;
+    $("serverBadge").textContent = `Provider connection failed: ${e.message}`;
     $("serverBadge").className = "badge red";
   }
 }
@@ -66,12 +79,13 @@ function renderModels() {
   if (!state.selectedModel && preferredModel && state.models.some((m) => m.id === preferredModel)) state.selectedModel = preferredModel;
   box.innerHTML = state.models.map((m) => {
     const sizeGb = m.estimatedSize ? (m.estimatedSize / 1024 ** 3).toFixed(1) + " GB" : "";
+    const canManage = state.providerId === "omlx";
     const badge = m.loaded ? '<span class="badge green">loaded</span>' : m.isLoading ? '<span class="badge yellow">loading…</span>' : '<span class="badge gray">not loaded</span>';
     return `<div class="model-item ${state.selectedModel === m.id ? "selected" : ""}" data-model="${esc(m.id)}">
       <span class="grow"><b>${esc(m.id)}</b><div class="mid">context ${m.maxModelLen ?? "—"} · ${sizeGb}${m.maxContextWindow ? " · limit " + m.maxContextWindow : ""}</div></span>
       ${badge}
-      <button class="small" data-act="load" data-model="${esc(m.id)}">${m.loaded ? "Preload" : "Load"}</button>
-      ${m.loaded && !m.isLoading ? `<button class="small danger" data-act="unload" data-model="${esc(m.id)}">Unload</button>` : ""}
+      ${canManage ? `<button class="small" data-act="load" data-model="${esc(m.id)}">${m.loaded ? "Preload" : "Load"}</button>` : ""}
+      ${canManage && m.loaded && !m.isLoading ? `<button class="small danger" data-act="unload" data-model="${esc(m.id)}">Unload</button>` : ""}
     </div>`;
   }).join("");
   box.querySelectorAll(".model-item").forEach((el) =>
@@ -139,6 +153,7 @@ $("btnStart").addEventListener("click", async () => {
       method: "POST",
       body: JSON.stringify({
         model: state.selectedModel,
+        providerId: state.providerId,
         name: $("txtRunName").value.trim() || undefined,
         dataset: $("selDataset").value,
         includeTaskNames: $("txtInclude").value.trim().split(/[\s,]+/).filter(Boolean),
@@ -521,6 +536,56 @@ $("btnSaveHarbor").addEventListener("click", async () => {
   $("numTimeoutMult").value = mult;
   $("cfgMsg").textContent = "Runner settings saved — new runs use agent timeout ×" + mult;
 });
+
+/* ---------------- providers ---------------- */
+let provDraft = [];
+function renderProvidersEditor() {
+  const box = $("provList");
+  if (!box) return;
+  if (!provDraft.length) {
+    provDraft = state.providers.map((p) => ({ id: p.id, label: p.label, baseUrl: p.baseUrl, apiKey: "" }));
+  }
+  box.innerHTML = provDraft
+    .map(
+      (p, i) => `<div class="row prov-row" data-i="${i}">
+      <label>Label <input data-k="label" value="${esc(p.label)}" /></label>
+      <label>Base URL <input data-k="baseUrl" value="${esc(p.baseUrl)}" style="min-width:260px" placeholder="host:port, without /v1" /></label>
+      <label>API key <input data-k="apiKey" placeholder="${p.id && state.providers.find((x) => x.id === p.id)?.hasKey ? "set — blank keeps it" : "optional"}" /></label>
+      ${p.id === "omlx" ? '<span class="badge gray">default</span>' : `<button class="small danger" data-del="${i}">Remove</button>`}
+    </div>`
+    )
+    .join("");
+  box.querySelectorAll("input[data-k]").forEach((inp) =>
+    inp.addEventListener("input", (e) => {
+      const row = e.target.closest(".prov-row");
+      provDraft[Number(row.dataset.i)][e.target.dataset.k] = e.target.value;
+    })
+  );
+  box.querySelectorAll("button[data-del]").forEach((b) =>
+    b.addEventListener("click", () => {
+      provDraft.splice(Number(b.dataset.del), 1);
+      renderProvidersEditor();
+    })
+  );
+}
+
+function bindProviderControls() {
+  const sel = $("selProvider");
+  if (sel) sel.addEventListener("change", (e) => { state.providerId = e.target.value; state.selectedModel = null; refreshServer(); });
+  const add = $("btnAddProv");
+  if (add) add.addEventListener("click", () => { provDraft.push({ id: "", label: "Provider", baseUrl: "", apiKey: "" }); renderProvidersEditor(); });
+  const save = $("btnSaveProv");
+  if (save) save.addEventListener("click", async () => {
+    const providers = provDraft.map((p, i) => ({ id: p.id || `prov-${i + 1}`, label: p.label, baseUrl: p.baseUrl, apiKey: p.apiKey }));
+    try {
+      await api("/api/providers", { method: "PUT", body: JSON.stringify({ providers }) });
+      $("provMsg").textContent = "Saved";
+      provDraft = [];
+      await refreshServer();
+    } catch (e) { $("provMsg").textContent = e.message; }
+  });
+}
+bindProviderControls();
 
 /* ---------------- boot ---------------- */
 refreshServer();

@@ -24,7 +24,8 @@
   <section id="tab-launch" class="panel">
     <div class="grid2">
       <div class="card">
-        <h2>1. Pick an oMLX model</h2>
+        <h2>1. Pick a model</h2>
+        <div class="row"><label>Provider <select id="selProvider"></select></label></div>
         <div id="modelList" class="model-list"><p class="muted">loading models…</p></div>
         <div class="row">
           <label><input type="checkbox" id="chkPreload" checked /> Preload model before starting</label>
@@ -86,6 +87,12 @@
   </section>
 
   <section id="tab-settings" class="panel hidden">
+    <div class="card">
+      <h2>Model providers</h2>
+      <p class="muted">Any OpenAI-compatible endpoint works (oMLX, OpenCodex, vLLM, LM Studio…). Model ids are read from <code>/v1/models</code>.</p>
+      <div id="provList"></div>
+      <div class="row"><button class="small" id="btnAddProv">Add provider</button><button class="primary" id="btnSaveProv">Save providers</button><span id="provMsg" class="muted"></span></div>
+    </div>
     <div class="card">
       <h2>oMLX connection</h2>
       <div class="row"><label>Base URL <input id="cfgBaseUrl" /></label></div>
