@@ -163,7 +163,9 @@ function copyTrial(src, dest) {
 
 function buildArgs(cfg, run, taskNames, jobName) {
   const h = cfg.harbor;
-  const args = ["run", "-p", path.join(h.datasetDir, run.dataset), "-a", h.agent, "--ak", `version=${h.agentVersion}`, "-m", `openai/${run.model}`, "--base-url", `${providerFor(cfg, run).baseUrl}/v1`, "-n", String(run.options.batchConcurrency), "-r", String(h.maxRetries)];
+  const prov = providerFor(cfg, run);
+  const endpoint = (prov.containerBaseUrl || prov.baseUrl).replace(/\/+$/, "");
+  const args = ["run", "-p", path.join(h.datasetDir, run.dataset), "-a", h.agent, "--ak", `version=${h.agentVersion}`, "-m", `openai/${run.model}`, "--base-url", `${endpoint}/v1`, "-n", String(run.options.batchConcurrency), "-r", String(h.maxRetries)];
   const attempts = Number(run.options.nAttempts || 1);
   if (attempts > 1) args.push("-k", String(attempts));
   const mult = Number(run.options.agentTimeoutMultiplier || 1);

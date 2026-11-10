@@ -164,7 +164,7 @@ async function handle(req, res) {
 
       /* ---------- providers ---------- */
       if (p === "/api/providers" && method === "GET") {
-        return send(res, 200, (cfg.providers || []).map((prov) => ({ id: prov.id, label: prov.label, baseUrl: prov.baseUrl, apiKeyMasked: maskKey(prov.apiKey), hasKey: !!prov.apiKey })));
+        return send(res, 200, (cfg.providers || []).map((prov) => ({ id: prov.id, label: prov.label, baseUrl: prov.baseUrl, containerBaseUrl: prov.containerBaseUrl || "", apiKeyMasked: maskKey(prov.apiKey), hasKey: !!prov.apiKey })));
       }
       if (p === "/api/providers" && method === "PUT") {
         const body = await readBody(req);
@@ -175,6 +175,7 @@ async function handle(req, res) {
             id: String(prov.id || "").trim() || "prov-" + Math.random().toString(36).slice(2, 8),
             label: String(prov.label || prov.id || "provider"),
             baseUrl: String(prov.baseUrl || "").replace(/\/+$/, ""),
+            containerBaseUrl: prov.containerBaseUrl ? String(prov.containerBaseUrl).replace(/\/+$/, "") : (existing[prov.id]?.containerBaseUrl || ""),
             apiKey: prov.apiKey ? String(prov.apiKey) : (existing[prov.id]?.apiKey || ""),
           }))
           .filter((x) => x.baseUrl);

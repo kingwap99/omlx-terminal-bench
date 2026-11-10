@@ -543,13 +543,14 @@ function renderProvidersEditor() {
   const box = $("provList");
   if (!box) return;
   if (!provDraft.length) {
-    provDraft = state.providers.map((p) => ({ id: p.id, label: p.label, baseUrl: p.baseUrl, apiKey: "" }));
+    provDraft = state.providers.map((p) => ({ id: p.id, label: p.label, baseUrl: p.baseUrl, containerBaseUrl: p.containerBaseUrl || "", apiKey: "" }));
   }
   box.innerHTML = provDraft
     .map(
       (p, i) => `<div class="row prov-row" data-i="${i}">
       <label>Label <input data-k="label" value="${esc(p.label)}" /></label>
       <label>Base URL <input data-k="baseUrl" value="${esc(p.baseUrl)}" style="min-width:260px" placeholder="host:port, without /v1" /></label>
+      <label>Container URL <input data-k="containerBaseUrl" value="${esc(p.containerBaseUrl || "")}" style="min-width:240px" placeholder="for Docker: host.docker.internal:port" /></label>
       <label>API key <input data-k="apiKey" placeholder="${p.id && state.providers.find((x) => x.id === p.id)?.hasKey ? "set — blank keeps it" : "optional"}" /></label>
       ${p.id === "omlx" ? '<span class="badge gray">default</span>' : `<button class="small danger" data-del="${i}">Remove</button>`}
     </div>`
@@ -576,7 +577,7 @@ function bindProviderControls() {
   if (add) add.addEventListener("click", () => { provDraft.push({ id: "", label: "Provider", baseUrl: "", apiKey: "" }); renderProvidersEditor(); });
   const save = $("btnSaveProv");
   if (save) save.addEventListener("click", async () => {
-    const providers = provDraft.map((p, i) => ({ id: p.id || `prov-${i + 1}`, label: p.label, baseUrl: p.baseUrl, apiKey: p.apiKey }));
+    const providers = provDraft.map((p, i) => ({ id: p.id || `prov-${i + 1}`, label: p.label, baseUrl: p.baseUrl, containerBaseUrl: p.containerBaseUrl, apiKey: p.apiKey }));
     try {
       await api("/api/providers", { method: "PUT", body: JSON.stringify({ providers }) });
       $("provMsg").textContent = "Saved";
