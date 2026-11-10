@@ -309,56 +309,176 @@ async function refreshRunDetail() {
 }
 
 /* ---------------- compare tab ---------------- */
+let compareRows = [];
+const DIFF_ORDER = { easy: 0, medium: 1, hard: 2, unknown: 9 };
+
+async function refreshRunsSilent() {
+  state.runs = await api("/api/runs");
+}
+
 async function renderComparePicker() {
   await refreshRunsSilent();
   const box = $("comparePicker");
-  const items = [...state.runs.map((r) => ({ id: r.id, label: r.name })), { id: "article", label: "📰 Article results (86 tasks)" }];
-  box.innerHTML = items.map((i) => `<span class="chip ${state.compareIds.has(i.id) ? "on" : ""}" data-id="${esc(i.id)}">${esc(i.label)}</span>`).join("");
-  box.querySelectorAll(".chip").forEach((c) =>
-    c.addEventListener("click", () => {
-      const id = c.dataset.id;
+  const items = state.runs.map((r) => ({
+    id: r.id,
+    label: r.name,
+    sub: [
+      r.model,
+      (r.options?.batchConcurrency ?? 1) === 1 ? "serial" : "parallel ×" + r.options.batchConcurrency,
+      "timeout ×" + (r.options?.agentTimeoutMultiplier ?? 1),
+      "attempts " + (r.options?.nAttempts ?? 1),
+      `${r.summary?.passed ?? 0}/${r.summary?.scored ?? 0} passed`,
+    ].join(" · "),
+  }));
+  items.push({ id: "article", label: "📰 Article results (86 tasks)", sub: "published numbers · RTX 5080 + Strata · not directly comparable" });
+  box.innerHTML =
+    items
+      .map(
+        (i) => `<label class="pick ${state.compareIds.has(i.id) ? "on" : ""}" data-id="${esc(i.id)}">
+        <input type="checkbox" ${state.compareIds.has(i.id) ? "checked" : ""} />
+        <span class="pgrow"><b>${esc(i.label)}</b><div class="mid">${esc(i.sub)}</div></span></label>`
+      )
+      .join("") +
+    `<div class="row" style="margin-top:8px"><button class="small" id="pickAll">Select all runs</button><button class="small" id="pickNone">Clear</button></div>`;
+  box.querySelectorAll(".pick").forEach((el) =>
+    el.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const id = el.dataset.id;
       state.compareIds.has(id) ? state.compareIds.delete(id) : state.compareIds.add(id);
-      c.classList.toggle("on");
+      renderComparePicker();
     })
   );
+  const all = $("pickAll");
+  const none = $("pickNone");
+  if (all) all.onclick = (e) => { e.preventDefault(); state.runs.forEach((r) => state.compareIds.add(r.id)); renderComparePicker(); };
+  if (none) none.onclick = (e) => { e.preventDefault(); state.compareIds.clear(); renderComparePicker(); };
 }
 
-async function refreshRunsSilent() { state.runs = await api("/api/runs"); }
+function pctBar(p, cls) {
+  if (p == null) return '<span class="muted">—</span>';
+  const w = Math.max(0, Math.min(100, p));
+  return `<div class="bar ${cls}"><div class="fill" style="width:${w}%"></div><span class="lbl">${p}%</span></div>`;
+}
+
+function renderBars(rows) {
+  $("barChart").innerHTML = rows
+    .map(
+      (r) => `<div class="brow">
+      <div class="bname"><b>${esc(r.label)}</b><div class="mid">${esc(r.model)} · ${r.scored} tasks${r.kind === "reference" ? " · article" : ""}</div></div>
+      <div class="bwrap" title="leak-checked pass rate">${pctBar(r.cleanPct, "clean")}<div class="mid">clean</div></div>
+      <div class="bwrap" title="raw pass rate">${pctBar(r.rawPct, "raw")}<div class="mid">raw</div></div>
+      <div class="bmeta">⏱ ${r.timeouts ?? "—"}<br />${r.elapsedSec ? fmtMin(r.elapsedSec / 60) : "—"}</div>
+    </div>`
+    )
+    .join("");
+  $("compareChart").classList.remove("hidden");
+}
+
+function diffCell(d) {
+  const parts = [
+    ["E", d?.easy?.rawPct],
+    ["M", d?.medium?.rawPct],
+    ["H", d?.hard?.rawPct],
+  ];
+  return `<div class="mini">${parts.map(([k, v]) => `<span class="chip-mini" title="${k === "E" ? "easy" : k === "M" ? "medium" : "hard"}">${k} ${v == null ? "—" : v + "%"}</span>`).join("")}</div>`;
+}
+
+function renderSummaryTable(rows) {
+  const maxScored = Math.max(...rows.map((r) => r.scored || 0));
+  $("compareTable").innerHTML = `<table class="cmp-table"><thead><tr>
+      <th>Run</th><th class="num">Tasks</th><th class="num">Passed</th>
+      <th>Leak-checked</th><th>Raw</th><th class="num">Timeouts</th><th class="num">Median</th><th class="num">Total</th>
+      <th>Difficulty E / M / H</th></tr></thead><tbody>${rows
+    .map((r) => `<tr>
+      <td><b>${esc(r.label)}</b>${r.kind === "reference" ? ' <span class="badge gray">article</span>' : ""}
+        <div class="mid">${esc(r.model)}${r.machine ? " · " + esc(r.machine) : ""}${r.memoryGb ? " · " + r.memoryGb + "GB" : ""}</div></td>
+      <td class="num">${r.scored}${r.scored < maxScored ? ' <span class="badge yellow" title="fewer tasks than the largest selection">⚠</span>' : ""}</td>
+      <td class="num"><b>${r.passed}</b> (${fmtPct(r.rawPct)})</td>
+      <td>${pctBar(r.cleanPct, "clean")}</td>
+      <td class="num">${fmtPct(r.rawPct)}</td>
+      <td class="num">${r.timeouts ?? "—"}</td>
+      <td class="num">${fmtMin(r.medianMin)}</td>
+      <td class="num">${r.elapsedSec ? fmtMin(r.elapsedSec / 60) : "—"}</td>
+      <td>${diffCell(r.byDifficulty)}</td>
+    </tr>`)
+    .join("")}</tbody></table>`;
+  $("compareSummaryCard").classList.remove("hidden");
+}
+
+async function renderMatrix(rows) {
+  const locals = rows.filter((r) => r.kind === "local");
+  const card = $("matrixCard");
+  if (!locals.length) {
+    card.classList.add("hidden");
+    return;
+  }
+  card.classList.remove("hidden");
+  const ds = locals[0].dataset;
+  state.diffCache = state.diffCache || {};
+  if (!state.diffCache[ds]) state.diffCache[ds] = await api(`/api/tasks?dataset=${encodeURIComponent(ds)}`);
+  const diffMap = Object.fromEntries(state.diffCache[ds].map((t) => [t.name, t.difficulty]));
+  const tasks = [...new Set(locals.flatMap((r) => Object.keys(r.tasks || {})))];
+  const onlyDiff = $("chkDiffOnly").checked;
+  const sortBy = $("selMatrixSort").value;
+  const statusOf = (r, t) => {
+    const x = (r.tasks || {})[t];
+    if (!x || !x.scored) return "none";
+    if (x.passed) return "pass";
+    return x.timedOut ? "timeout" : "fail";
+  };
+  let list = tasks.map((t) => {
+    const st = locals.map((r) => statusOf(r, t));
+    return { t, st, passes: st.filter((s) => s === "pass").length, diff: diffMap[t] || "unknown" };
+  });
+  if (onlyDiff) list = list.filter((x) => new Set(x.st).size > 1);
+  if (sortBy === "difficulty") list.sort((a, b) => (DIFF_ORDER[a.diff] ?? 9) - (DIFF_ORDER[b.diff] ?? 9) || a.t.localeCompare(b.t));
+  else if (sortBy === "passes") list.sort((a, b) => b.passes - a.passes || a.t.localeCompare(b.t));
+  else list.sort((a, b) => a.t.localeCompare(b.t));
+  const icon = { pass: "✅", fail: "❌", timeout: "⏱", none: "·" };
+  const cls = { pass: "c-pass", fail: "c-fail", timeout: "c-timeout", none: "c-none" };
+  const short = (r) => r.model.replace("Qwen3.8-Flash-Next-", "").replace("-mtp", "");
+  $("compareDiff").innerHTML = `<table class="matrix-table"><thead><tr>
+      <th class="stick">Task</th><th>Diff</th>
+      ${locals.map((r) => `<th title="${esc(r.label)}">${esc(short(r))}<div class="mid">${esc((r.createdAt || "").slice(11, 16))}${(r.options?.agentTimeoutMultiplier ?? 1) !== 1 ? " · ×" + r.options.agentTimeoutMultiplier : ""}</div></th>`).join("")}
+    </tr></thead><tbody>${list
+    .map(
+      (x) => `<tr><td class="stick">${esc(x.t)}</td><td class="muted">${esc(x.diff)}</td>${x.st
+        .map((s) => `<td class="${cls[s]}">${icon[s]}</td>`)
+        .join("")}</tr>`
+    )
+    .join("")}</tbody>
+    <tfoot><tr><td class="stick">Passed</td><td></td>${locals
+      .map((r) => `<td><b>${Object.values(r.tasks || {}).filter((x) => x.passed).length}/${r.scored}</b></td>`)
+      .join("")}</tr></tfoot></table>`;
+  $("cmpMsg").textContent = `${list.length}${onlyDiff ? " differing" : " total"} task rows · ${locals.length} runs`;
+}
+
+async function renderCompare() {
+  const ids = [...state.compareIds];
+  if (ids.length < 2) {
+    $("cmpMsg").textContent = "Pick at least two runs";
+    return;
+  }
+  const { rows } = await api(`/api/compare?ids=${encodeURIComponent(ids.join(","))}`);
+  if (!rows.length) {
+    $("cmpMsg").textContent = "No data";
+    return;
+  }
+  compareRows = rows;
+  renderBars(rows);
+  renderSummaryTable(rows);
+  await renderMatrix(rows);
+}
 
 $("btnCompare").addEventListener("click", async () => {
-  const ids = [...state.compareIds];
-  if (ids.length < 2) { $("compareTable").innerHTML = '<p class="muted">Pick at least two runs</p>'; return; }
-  const { rows } = await api(`/api/compare?ids=${encodeURIComponent(ids.join(","))}`);
-  if (!rows.length) { $("compareTable").innerHTML = '<p class="muted">No data</p>'; return; }
-  const maxScored = Math.max(...rows.map((r) => r.scored || 0));
-  $("compareTable").innerHTML = `<table><thead><tr><th>Run</th><th>Model</th><th>Dataset</th><th class="num">Tasks</th><th class="num">Passed</th><th class="num">Raw</th><th class="num">Leak-checked</th><th class="num">Timeouts</th><th class="num">Median</th><th class="num">Total</th><th>Easy / Med / Hard</th><th>Machine</th></tr></thead><tbody>${rows
-    .map((r) => {
-      const d = r.byDifficulty || {};
-      const diffStr = ["easy", "medium", "hard"].map((k) => `${fmtPct(d[k]?.rawPct)}`).join(" / ");
-      return `<tr><td>${esc(r.label)}${r.kind === "reference" ? ' <span class="badge gray">article</span>' : ""}</td><td>${esc(r.model)}</td><td>${esc(r.dataset || "")}</td>
-        <td class="num">${r.scored}${r.scored < maxScored ? " ⚠" : ""}</td><td class="num">${r.passed}</td>
-        <td class="num">${fmtPct(r.rawPct)}</td><td class="num"><b>${fmtPct(r.cleanPct)}</b></td>
-        <td class="num">${r.timeouts ?? "—"}</td><td class="num">${fmtMin(r.medianMin)}</td>
-        <td class="num">${r.elapsedSec != null ? fmtMin(r.elapsedSec / 60) : "—"}</td>
-        <td>${diffStr}</td><td>${esc(r.machine || "—")}${r.memoryGb ? ` · ${r.memoryGb}GB` : ""}</td></tr>`;
-    })
-    .join("")}</tbody></table>
-    <p class="muted">⚠ Percentages are not directly comparable when task counts differ. Leak-checked = pass rate after excluding runs that leaked benchmark context.</p>`;
-  const locals = rows.filter((r) => r.kind === "local");
-  if (locals.length >= 2) {
-    const allTasks = [...new Set(locals.flatMap((r) => Object.keys(r.tasks || {})))].sort();
-    $("cmpDiffTitle").classList.remove("hidden");
-    $("compareDiff").innerHTML = `<table><thead><tr><th>Task</th>${locals.map((r) => `<th>${esc(r.label)}</th>`).join("")}</tr></thead><tbody>${allTasks
-      .map((t) => `<tr><td>${esc(t)}</td>${locals.map((r) => {
-        const x = (r.tasks || {})[t];
-        if (!x || !x.scored) return '<td class="muted">—</td>';
-        return `<td>${x.passed ? "✅" : x.timedOut ? "⏱" : "❌"}${x.flagged ? " ⚠" : ""}</td>`;
-      }).join("")}</tr>`).join("")}</tbody></table>`;
-  } else {
-    $("cmpDiffTitle").classList.add("hidden");
-    $("compareDiff").innerHTML = "";
+  try {
+    await renderCompare();
+  } catch (e) {
+    $("cmpMsg").textContent = e.message;
   }
 });
+$("chkDiffOnly").addEventListener("change", () => compareRows.length && renderMatrix(compareRows));
+$("selMatrixSort").addEventListener("change", () => compareRows.length && renderMatrix(compareRows));
 
 /* ---------------- settings tab ---------------- */
 async function loadSettings() {

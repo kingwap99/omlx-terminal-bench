@@ -70,11 +70,18 @@
   <section id="tab-compare" class="panel hidden">
     <div class="card">
       <h2>Compare runs</h2>
-      <div id="comparePicker" class="chips"></div>
-      <div class="row"><button id="btnCompare" class="primary">Build comparison</button></div>
-      <div id="compareTable" class="table-wrap"></div>
-      <h3 id="cmpDiffTitle" class="hidden">Per-task results (✅ pass / ❌ fail / ⏱ timeout)</h3>
-      <div id="compareDiff" class="table-wrap"></div>
+      <div id="comparePicker" class="picker"></div>
+      <div class="row"><button id="btnCompare" class="primary">Build comparison</button><span id="cmpMsg" class="muted"></span></div>
+    </div>
+    <div id="compareChart" class="card hidden"><h2>Pass rate</h2><div id="barChart" class="bars"></div></div>
+    <div id="compareSummaryCard" class="card hidden"><h2>Summary</h2><div id="compareTable" class="table-wrap"></div></div>
+    <div id="matrixCard" class="card hidden">
+      <h2>Per-task results</h2>
+      <div class="row">
+        <label><input type="checkbox" id="chkDiffOnly" checked /> Only tasks where results differ</label>
+        <label>Sort <select id="selMatrixSort"><option value="task">Task</option><option value="difficulty">Difficulty</option><option value="passes">Pass count</option></select></label>
+      </div>
+      <div id="compareDiff" class="table-wrap matrix"></div>
     </div>
   </section>
 
