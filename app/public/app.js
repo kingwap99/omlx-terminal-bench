@@ -439,7 +439,7 @@ async function renderMatrix(rows) {
   const short = (r) => r.model.replace("Qwen3.8-Flash-Next-", "").replace("-mtp", "");
   $("compareDiff").innerHTML = `<table class="matrix-table"><thead><tr>
       <th class="stick">Task</th><th>Diff</th>
-      ${locals.map((r) => `<th title="${esc(r.label)}">${esc(short(r))}<div class="mid">${esc((r.createdAt || "").slice(11, 16))}${(r.options?.agentTimeoutMultiplier ?? 1) !== 1 ? " · ×" + r.options.agentTimeoutMultiplier : ""}</div></th>`).join("")}
+      ${locals.map((r) => `<th title="${esc(r.label)}">${esc(short(r))}<div class="mid">${esc(r.createdAt ? new Date(r.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "")}${(r.options?.agentTimeoutMultiplier ?? 1) !== 1 ? " · ×" + r.options.agentTimeoutMultiplier : ""}</div></th>`).join("")}
     </tr></thead><tbody>${list
     .map(
       (x) => `<tr><td class="stick">${esc(x.t)}</td><td class="muted">${esc(x.diff)}</td>${x.st
