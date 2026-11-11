@@ -219,9 +219,10 @@ function collectBatchResults(run, records, batchDir, taskMeta, jobName) {
       const agentNeverRan =
         !record.passed &&
         (record.inputTokens || 0) + (record.outputTokens || 0) === 0 &&
-        (record.durationSec == null || record.durationSec < 90) &&
         !!record.exceptionType &&
-        /ExitCode|UnknownApi|Container|Docker|Setup/i.test(record.exceptionType);
+        (/ExitCode|Container|Docker|Setup/i.test(record.exceptionType)
+          ? record.durationSec == null || record.durationSec < 90
+          : /API|Connection/i.test(record.exceptionType));
       if (agentNeverRan) continue;
       const dest = path.join(runDir(run.id), "trials", trial.name);
       try {
@@ -377,7 +378,7 @@ async function loop(cfg, run) {
         const stuck = group.filter((name) => attempts[name] >= 2);
         if (stuck.length) {
           run.status = "error";
-          run.note = `harbor finished without a result for ${stuck.join(", ")} (2 attempts). Check that trial's log.`;
+          run.note = `harbor produced no usable result for ${stuck.join(", ")} (2 attempts) — often the model endpoint is unreachable from containers. Check the agent log for "ECONNREFUSED".`;
           saveRun(run, records);
           return;
         }

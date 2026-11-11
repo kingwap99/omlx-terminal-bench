@@ -164,9 +164,9 @@ export function recordFromTrial(task, trialDir, meta = {}) {
     /(^|\n)\s*(PASSED|FAILED)\s/.test(vOut) ||
     /\b\d+ (passed|failed)\b/i.test(vOut) ||
     /={5,}.*(passed|failed).*={5,}/i.test(vOut);
-  const verifierAnomaly = !passed && !timedOut && reward !== null && hasStdout && !hasTests;
   const timeoutSec = meta.agentTimeoutSec ?? null;
   const timedOut = exception.exception_type === "AgentTimeoutError" || (duration != null && timeoutSec != null && duration >= timeoutSec - 5);
+  const verifierAnomaly = !passed && !timedOut && reward !== null && hasStdout && !hasTests;
 
   return {
     task,
