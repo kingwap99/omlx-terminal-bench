@@ -49,9 +49,25 @@ async function refreshServer() {
       state.providerId = provs.some((p) => p.id === keep) ? keep : provs[0]?.id || "omlx";
       sel.value = state.providerId;
     }
-    const pid = encodeURIComponent(state.providerId);
-    const label = provs.find((p) => p.id === state.providerId)?.label || state.providerId;
-    const st = await api(`/api/providers/${pid}/models`);
+    let pid = encodeURIComponent(state.providerId);
+    let label = provs.find((p) => p.id === state.providerId)?.label || state.providerId;
+    let st = await api(`/api/providers/${pid}/models`);
+    /* A provider that is down (e.g. oMLX between runs) must not blank the
+       launcher: fall back to the first provider that can list models. */
+    if (st.error) {
+      for (const p of provs) {
+        if (p.id === state.providerId) continue;
+        const alt = await api(`/api/providers/${encodeURIComponent(p.id)}/models`).catch(() => null);
+        if (alt && !alt.error && (alt.models || []).length) {
+          state.providerId = p.id;
+          sel.value = p.id;
+          pid = encodeURIComponent(p.id);
+          label = p.label;
+          st = alt;
+          break;
+        }
+      }
+    }
     $("serverBadge").textContent = st.error ? `${label}: ${st.error}` : `${label} online (${st.models.length} models)`;
     $("serverBadge").className = `badge ${st.error ? "red" : "green"}`;
     const meta = await api(`/api/providers/${pid}/status`).catch(() => null);
