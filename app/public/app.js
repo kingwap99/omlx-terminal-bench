@@ -256,6 +256,8 @@ async function refreshRunDetail() {
       resultCell = `<span class="muted">${esc(first.exceptionType || "unscored")}</span>`;
     } else if (first.verifierAnomaly) {
       resultCell = '<span class="fail" title="verifier produced no test output">⚠ verifier</span>';
+    } else if (first.exceptionType === "VerifierTimeoutError") {
+      resultCell = '<span class="fail" title="the grader ran out of time (verifier timeout)">⏱ verifier timeout</span>';
     } else {
       resultCell = first.passed ? '<span class="pass">✅ pass</span>' : first.timedOut ? '<span class="fail">⏱ timeout</span>' : '<span class="fail">❌ fail</span>';
     }
@@ -266,11 +268,16 @@ async function refreshRunDetail() {
     const tps = durSum ? (tokOut / durSum).toFixed(1) : "—";
     const flagged = list.find((x) => x.flagged);
     const rowCls = passedN === list.length ? "ok-flag" : passedN > 0 ? "" : "bad-flag";
-    const timeCell = multi ? list.map((x) => fmtMin((x.durationSec || 0) / 60)).join(" / ") : first.durationSec != null ? fmtMin(first.durationSec / 60) : "—";
+    const limit = first.agentTimeoutSec ? ` limit ${fmtMin(first.agentTimeoutSec / 60)}` : "";
+    const timeCell = multi
+      ? list.map((x) => fmtMin((x.durationSec || 0) / 60)).join(" / ")
+      : first.durationSec != null
+        ? fmtMin(first.durationSec / 60)
+        : "—";
     return `<tr class="${rowCls}">
       <td>${esc(task)}</td><td>${esc(first.difficulty || "—")}</td>
       <td>${resultCell}</td>
-      <td class="num">${timeCell}</td>
+      <td class="num"${limit ? ` title="agent timeout${esc(limit)}"` : ""}>${timeCell}</td>
       <td class="num">${tools}</td><td class="num">${(tokIn / 1000).toFixed(0)}K/${(tokOut / 1000).toFixed(1)}K</td>
       <td class="num">${tps}</td>
       <td>${flagged ? `⚠ ${esc((flagged.flags || []).join(", "))}` : "—"}</td></tr>`;

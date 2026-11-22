@@ -248,7 +248,13 @@ function buildArgs(cfg, run, taskNames, jobName) {
   const attempts = Number(run.options.nAttempts || 1);
   if (attempts > 1) args.push("-k", String(attempts));
   const mult = Number(run.options.agentTimeoutMultiplier || 1);
-  if (mult !== 1) args.push("--agent-timeout-multiplier", String(mult));
+  if (mult !== 1) {
+    args.push("--agent-timeout-multiplier", String(mult));
+    /* Harbor keeps the verifier budget separate from the agent budget, so a
+       slow host that needs 30 min to attempt a task also needs longer to grade
+       it; otherwise the task fails as VerifierTimeoutError. */
+    args.push("--verifier-timeout-multiplier", String(mult));
+  }
   for (const e of h.retryInclude || []) args.push("--retry-include", e);
   for (const n of taskNames) args.push("-i", n);
   for (const n of h.envExtraArgs || []) args.push(n);
