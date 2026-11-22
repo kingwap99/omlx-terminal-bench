@@ -112,7 +112,7 @@ function dockerCheck(cfg) {
     let out = "";
     let child;
     try {
-      child = spawn(process.env.DOCKER_BIN || "docker", ["info", "--format", "{{.ServerVersion}}"], { env, stdio: ["ignore", "pipe", "pipe"] });
+      child = spawn(h.dockerBin || "docker", ["info", "--format", "{{.ServerVersion}}"], { env, stdio: ["ignore", "pipe", "pipe"] });
     } catch (e) {
       return resolve({ ok: false, detail: String(e.message || e) });
     }
@@ -121,6 +121,85 @@ function dockerCheck(cfg) {
     child.on("error", (e) => resolve({ ok: false, detail: e.message }));
     child.on("exit", (code) => resolve({ ok: code === 0, detail: out.trim().slice(0, 400) }));
   });
+}
+
+/* Colima (the Docker VM) is only wanted while a batch runs, so the runner
+   brings it up on demand instead of keeping it alive from login. */
+function colimaCheck(cfg) {
+  return new Promise((resolve) => {
+    let out = "";
+    let child;
+    try {
+      child = spawn(cfg.harbor.colimaBin || "colima", ["status"], { stdio: ["ignore", "pipe", "pipe"] });
+    } catch (e) {
+      return resolve({ running: false, detail: String(e.message || e) });
+    }
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (out += d));
+    child.on("error", () => resolve({ running: false, detail: "colima binary not found" }));
+    child.on("exit", (code) => {
+      const text = out.trim();
+      resolve({ running: code === 0 && !/is not running/i.test(text), detail: text.slice(-400) });
+    });
+  });
+}
+
+function startColima(cfg) {
+  const timeoutMs = Number(cfg.harbor.colimaStartTimeoutSec || 180) * 1000;
+  const args = ["start"];
+  const profile = cfg.harbor.colimaProfile;
+  if (profile && profile !== "default") args.push("-p", profile);
+  return new Promise((resolve) => {
+    let out = "";
+    let child;
+    try {
+      child = spawn(cfg.harbor.colimaBin || "colima", args, { stdio: ["ignore", "pipe", "pipe"] });
+    } catch (e) {
+      return resolve({ ok: false, detail: String(e.message || e) });
+    }
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        /* gone */
+      }
+      resolve({ ok: false, detail: `colima start did not finish within ${timeoutMs / 1000}s` });
+    }, timeoutMs);
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (out += d));
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      resolve({ ok: false, detail: e.message });
+    });
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      resolve({ ok: code === 0, detail: out.trim().slice(-600) });
+    });
+  });
+}
+
+/* Make sure the container runtime answers. Starts Colima when the VM is down
+   and waits for the Docker socket to appear. */
+async function ensureDocker(cfg, log) {
+  const h = cfg.harbor;
+  if (h.requireDocker === false) return { ok: true, detail: "docker not required" };
+  const first = await dockerCheck(cfg);
+  if (first.ok) return first;
+  if (h.autoStartColima === false) return first;
+  const colima = await colimaCheck(cfg);
+  if (!colima.running) {
+    log(`[runner] container runtime down (${first.detail.slice(0, 120)}) — starting Colima…`);
+    const started = await startColima(cfg);
+    if (!started.ok) return { ok: false, detail: `colima start failed: ${started.detail}` };
+    log("[runner] colima start finished, waiting for the docker socket");
+  }
+  const deadline = Date.now() + Number(h.colimaStartTimeoutSec || 180) * 1000;
+  for (;;) {
+    const again = await dockerCheck(cfg);
+    if (again.ok) return again;
+    if (Date.now() > deadline) return { ok: false, detail: `docker still unreachable: ${again.detail}` };
+    await new Promise((r) => setTimeout(r, 2000));
+  }
 }
 
 function copyTrial(src, dest) {
@@ -412,9 +491,45 @@ async function loop(cfg, run) {
     run.note = String(err?.message || err);
     saveRun(run, records);
   } finally {
+    if (cfg.harbor.autoStopColima !== false) await stopColima(cfg, path.join(dir, "runner.log"));
     runtime.delete(run.id);
     if (activeRunId === run.id) activeRunId = null;
   }
+}
+
+/* Release the VM once nothing else needs it; the next Start brings it back. */
+async function stopColima(cfg, logFile) {
+  const h = cfg.harbor;
+  if (h.requireDocker === false) return;
+  const colima = await colimaCheck(cfg);
+  if (!colima.running) return;
+  try {
+    fs.appendFileSync(logFile, "\n[runner] queue finished — stopping Colima to free memory\n");
+  } catch {
+    /* logging is best effort */
+  }
+  const args = ["stop"];
+  const profile = h.colimaProfile;
+  if (profile && profile !== "default") args.push("-p", profile);
+  await new Promise((resolve) => {
+    const child = spawn(h.colimaBin || "colima", args, { stdio: "ignore" });
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* gone */
+      }
+      resolve();
+    }, 60000);
+    child.on("error", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    child.on("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }
 
 function notify(run) {
@@ -502,10 +617,22 @@ export async function startRun(cfg, id) {
   if (runtime.has(id)) return { started: false, reason: "already-running", run };
   if (activeRunId && activeRunId !== id) return { started: false, reason: "another-run-active:" + activeRunId, run };
   if (cfg.harbor.requireDocker !== false) {
-    const docker = await dockerCheck(cfg);
+    /* Bring the VM up as part of starting the run: the socket is only needed
+       while batches execute, and a login-time daemon would sit idle all day. */
+    run.status = "running";
+    run.note = "Starting container runtime…";
+    saveRun(run);
+    const logFile = path.join(runDir(id), "runner.log");
+    const docker = await ensureDocker(cfg, (line) => {
+      try {
+        fs.appendFileSync(logFile, `${line}\n`);
+      } catch {
+        /* logging is best effort */
+      }
+    });
     if (!docker.ok) {
       run.status = "error";
-      run.note = `Container runtime unreachable: ${docker.detail || "docker info failed"}. Start Docker (Colima), then press Resume.`;
+      run.note = `Container runtime unreachable: ${docker.detail || "docker info failed"}. Press Resume to retry.`;
       saveRun(run);
       return { started: false, reason: "docker-unavailable", run };
     }

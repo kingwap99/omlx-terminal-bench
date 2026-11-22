@@ -21,6 +21,8 @@ const DEFAULTS = {
   },
   harbor: {
     binary: process.env.HARBOR_BIN || "harbor",
+    dockerBin: process.env.DOCKER_BIN || "docker",
+    colimaBin: process.env.COLIMA_BIN || "colima",
     dockerHost: process.env.DOCKER_HOST || "",
     agent: "qwen-coder",
     agentVersion: "0.26.7",
@@ -37,6 +39,13 @@ const DEFAULTS = {
     agentTimeoutMultiplier: 1,
     nAttempts: 1,
     requireDocker: true,
+    /* Colima is only needed while a batch runs, so the runner starts it on
+       demand and never leaves a VM behind afterwards. */
+    autoStartColima: true,
+    colimaStartTimeoutSec: 180,
+    colimaProfile: "default",
+    /* stop the VM again when the queue drains, so it does not sit idle */
+    autoStopColima: true,
     envExtraArgs: ["--no-force-build"],
   },
   notify: true,

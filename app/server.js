@@ -154,6 +154,11 @@ async function handle(req, res) {
             cfg.harbor.agentTimeoutMultiplier = Math.max(0.25, Math.min(8, Number(body.harbor.agentTimeoutMultiplier) || 1));
           }
           if (body.harbor.requireDocker !== undefined) cfg.harbor.requireDocker = !!body.harbor.requireDocker;
+          for (const k of ["dockerBin", "colimaBin", "colimaProfile"]) if (body.harbor[k]) cfg.harbor[k] = String(body.harbor[k]);
+          for (const k of ["autoStartColima", "autoStopColima"]) if (body.harbor[k] !== undefined) cfg.harbor[k] = !!body.harbor[k];
+          if (body.harbor.colimaStartTimeoutSec !== undefined) {
+            cfg.harbor.colimaStartTimeoutSec = Math.max(30, Math.min(900, Number(body.harbor.colimaStartTimeoutSec) || 180));
+          }
           if (body.harbor.nAttempts !== undefined) cfg.harbor.nAttempts = Math.max(1, Math.min(5, Math.round(Number(body.harbor.nAttempts) || 1)));
         }
         if (body.notify !== undefined) cfg.notify = !!body.notify;
